@@ -1,0 +1,1132 @@
+---
+title: "MSB1005 Final Assignment 2022"
+author: "Sebastian Ayala Ruano"
+date: "`r Sys.Date()`"
+output: html_document
+---
+## Dataset description
+The assignment requires you to create an R script that imports a transcriptomics dataset and exports an 
+annotated data file that is suitable for downstream biological analysis, such as pathway and network 
+analysis (covered in week 6 of the course). The dataset that you will use for this is already familiar. 
+We will be using an [RNA-sequencing dataset from the MAGNet consortium](https://github.com/mpmorley/MAGNet). To generate this dataset, leftventricular free-wall tissue was harvested at the time of cardiac surgery fromsubjects with heart failure undergoing transplantation and from unused donor hearts with apparently normal function.  This dataset is a spectacular resource of left ventricular transcriptomes of **non-failing healthy donors**, 
+**Peripartum cardiomyopathy (PPCM)**, **Hypertrophic cardiomyopathy (HCM)** and **Dilated cardiomyopathy (DCM)** patients. Next to the RNA-sequencing data (in log2-transformed CPM values), extensive participant information is available (age, sex, ethnicity, disease state, and so on).
+
+## General comments about the script format and organization
+
+### Code style
+I will use the tidyverse R coding style format for most of the questions. In general, this code style 
+uses various *verbs* or *functions* chained together with the *pipe operator* `%>%` to create a
+data pipeline that is easy to read and understand. 
+
+### Format of the script
+I will use an rmarkdown script to write the code and the answers to the questions.  The advantage of 
+this file format is that it allows you to write code and text in the same file, and it will render the
+code and the text into a single html/pdf file. This is very useful for reproducible research, as it allows
+you to share your code, detailed comments, and results in a single file. Each code chunk has some
+options for rendering the code and the output (i.e., `echo: true`). A detailed description of the
+rmarkdown file format can be found [here](https://rmarkdown.rstudio.com/lesson-1.html). 
+
+The best way to run the script is to open the `MSB1005_Final_Assignment_2022.Rmd` file in RStudio and
+click on the run button and press the `Run all Chunks Bellow`, which will run
+all the lines of code and display the inline outputs below each cell. There are some cells
+that have issues with the html rendering, so the `Knit` button will show an error.
+
+### Outputs of the script
+All the outputs (i.e., figures, tables, etc.) will be saved in the folder in which the script is located.
+
+### Reproducibility of the script
+To guarantee the reproducibility of the script, I will assume that the user has a fresh R session, so in 
+the first chunk of code I will install the required packages to run the script.
+
+```{r, install-packages, echo: TRUE, warning: FALSE, message: FALSE}
+# List of packages to install
+my_packages <- c("ggplot2", "biomaRt", "pcaMethods", "readr", "dplyr", "tibble", "tidyr",
+                "purrr", "flextable", "ggsci", "cowplot", "DataExplorer", "corrmorant", 
+                "limma", "variancePartition", "edgeR")
+# Extract not installed packages                                        
+not_installed <- my_packages[!(my_packages %in% installed.packages()[ , "Package"])] 
+
+# Install missing packages
+if(length(not_installed)) install.packages(not_installed)                           
+
+```
+
+Also, below there is the output of the `sessionInfo()` function, which will allow you to reproduce the
+exact same environment that I used to run the script.
+
+```
+R version 4.2.2 (2022-10-31)
+Platform: x86_64-pc-linux-gnu (64-bit)
+Running under: Manjaro Linux
+
+Matrix products: default
+BLAS:   /usr/lib/libblas.so.3.11.0
+LAPACK: /usr/lib/liblapack.so.3.11.0
+
+locale:
+ [1] LC_CTYPE=en_US.UTF-8       LC_NUMERIC=C               LC_TIME=en_US.UTF-8        LC_COLLATE=en_US.UTF-8     LC_MONETARY=en_US.UTF-8    LC_MESSAGES=en_US.UTF-8   
+ [7] LC_PAPER=en_US.UTF-8       LC_NAME=C                  LC_ADDRESS=C               LC_TELEPHONE=C             LC_MEASUREMENT=en_US.UTF-8 LC_IDENTIFICATION=C       
+
+attached base packages:
+[1] stats     graphics  grDevices utils     datasets  methods   base     
+
+other attached packages:
+ [1] knitr_1.41               rmarkdown_2.18           data.table_1.14.6        edgeR_3.40.0             variancePartition_1.28.0 BiocParallel_1.32.4      limma_3.54.0            
+ [8] corrmorant_0.0.0.9007    DataExplorer_0.8.2       cowplot_1.1.1            ggsci_2.9                flextable_0.8.3          purrr_0.3.5              tidyr_1.2.1             
+[15] tibble_3.1.8             dplyr_1.0.10             readr_2.1.3              pcaMethods_1.90.0        Biobase_2.58.0           BiocGenerics_0.44.0      biomaRt_2.54.0          
+[22] ggplot2_3.4.0           
+
+loaded via a namespace (and not attached):
+  [1] minqa_1.2.5            colorspace_2.0-3       ellipsis_0.3.2         XVector_0.38.0         base64enc_0.1-3        farver_2.1.1           bit64_4.0.5           
+  [8] AnnotationDbi_1.60.0   fansi_1.0.3            xml2_1.3.3             codetools_0.2-18       splines_4.2.2          doParallel_1.0.17      cachem_1.0.6          
+ [15] jsonlite_1.8.4         nloptr_2.0.3           RhpcBLASctl_0.21-247.1 pbkrtest_0.5.1         broom_1.0.1            dbplyr_2.2.1           png_0.1-8             
+ [22] aod_1.3.2              compiler_4.2.2         httr_1.4.4             backports_1.4.1        assertthat_0.2.1       Matrix_1.5-1           fastmap_1.1.0         
+ [29] cli_3.4.1              later_1.3.0            htmltools_0.5.4        prettyunits_1.1.1      tools_4.2.2            igraph_1.3.5           gtable_0.3.1          
+ [36] glue_1.6.2             GenomeInfoDbData_1.2.9 reshape2_1.4.4         rappdirs_0.3.3         Rcpp_1.0.9             jquerylib_0.1.4        vctrs_0.5.1           
+ [43] Biostrings_2.66.0      nlme_3.1-160           iterators_1.0.14       xfun_0.35              stringr_1.5.0          rbibutils_2.2.11       networkD3_0.4         
+ [50] lme4_1.1-31            lifecycle_1.0.3        gtools_3.9.4           XML_3.99-0.13          zlibbioc_1.44.0        MASS_7.3-58.1          scales_1.2.1          
+ [57] vroom_1.6.0            ragg_1.2.4             hms_1.1.2              parallel_4.2.2         yaml_2.3.6             curl_4.3.3             memoise_2.0.1         
+ [64] gridExtra_2.3          sass_0.4.4             gdtools_0.2.4          stringi_1.7.8          RSQLite_2.2.19         highr_0.9              S4Vectors_0.36.1      
+ [71] foreach_1.5.2          caTools_1.18.2         filelock_1.0.2         boot_1.3-28            zip_2.2.2              GenomeInfoDb_1.34.4    Rdpack_2.4            
+ [78] rlang_1.0.6            pkgconfig_2.0.3        systemfonts_1.0.4      bitops_1.0-7           evaluate_0.19          lattice_0.20-45        labeling_0.4.2        
+ [85] htmlwidgets_1.5.4      bit_4.0.5              tidyselect_1.2.0       plyr_1.8.8             magrittr_2.0.3         R6_2.5.1               IRanges_2.32.0        
+ [92] gplots_3.1.3           generics_0.1.3         DBI_1.1.3              pillar_1.8.1           withr_2.5.0            KEGGREST_1.38.0        RCurl_1.98-1.9        
+ [99] crayon_1.5.2           httpgd_1.3.0           uuid_1.1-0             KernSmooth_2.23-20     utf8_1.2.2             BiocFileCache_2.6.0    tzdb_0.3.0            
+[106] officer_0.4.4          progress_1.2.2         locfit_1.5-9.6         grid_4.2.2             blob_1.2.3             digest_0.6.31          textshaping_0.3.6 
+```
+
+It should be noted that there are better ways to ensure the reproducibility of R scripts and projects. One alternative is to use the 
+R package `renv` (https://rstudio.github.io/renv/articles/renv.html). This package creates a local library of packages that are used in an individual project. 
+This way, the packages used in the project will be the same as the ones used by people that want to replicate the analysis. However, there can be some issues with 
+OS compatibility and package versions, which can be solved by using docker containers (https://www.docker.com/), which can replicate the exact environment of the
+analysis, including OS and package dependencies.
+
+## Packages required for running the script
+```{r, imports, echo: true, warning: false, message: false}
+# Import libraries
+library(ggplot2)
+library(biomaRt)
+library(pcaMethods)
+library(readr)
+library(dplyr)
+library(tibble)
+library(tidyr)
+library(purrr)
+library(flextable)
+library(ggsci)
+library(cowplot)
+library(DataExplorer)
+library(corrmorant)
+library(limma)
+library(variancePartition)
+library(edgeR)
+```
+
+## 1. Data import
+### 1.1. Import the all the data files
+
+#### Download the data from a permanent link and import it from your local computer
+If you have already downloaded the data, the code will omit the download  and unzip step and will 
+import the data from your local computer.
+
+```{r, import_data1, echo: TRUE, warning: FALSE, message: FALSE}
+# Download zip file with the data if it does not exist in the working directory
+if(file.exists("MAGNET_GX_Assignment_2022.zip")) {
+    print("File already exists")
+} else {
+    download.file("https://surfdrive.surf.nl/files/index.php/s/mZrXMDlQ1Z1LvTn/download",
+                destfile = "MAGNET_GX_Assignment_2022.zip", mode="wb")
+}
+
+# Unzip the file if it does not exist in the working directory
+if(file.exists("MAGNET_GeneExpressionData_CPM_19112020.txt") &
+    file.exists("MAGNET_SampleData_18112022.csv") &
+    file.exists("MAGNET_exonLengths.txt")) {
+    print("Files were already unzipped")
+} else {
+    unzip("MAGNET_GX_Assignment_2022.zip")
+}
+
+# Import the data
+gxData_cpm <- read_delim("MAGNET_GeneExpressionData_CPM_19112020.txt", delim = "\t")
+sampleInfo <- read_csv("MAGNET_SampleData_18112022.csv")
+geneTotExonLengths <- read_delim("MAGNET_exonLengths.txt", delim = "\t")
+
+# Add gene ID as the row names
+gxData_cpm <- column_to_rownames(gxData_cpm, var = "EnsemblGeneID")
+geneTotExonLengths <- column_to_rownames(geneTotExonLengths, var = "EnsemblGeneID")
+
+# Add sample name as the row names
+sampleInfo <- column_to_rownames(sampleInfo, var = "sample_name")
+```
+
+### 1.2. Export a publication-ready table of participant characteristics, including statistics comparing the four etiologies
+
+#### Data exploration of co-variate data
+First of all, I will explore the co-variate data to look for variable's distributions, outliers, missing values, the relationships between them, 
+and so on. I will use some functions of the `DataExplorer` package for this purpose.
+
+##### General proportions about data types and missing/incomplete rows/columns
+```{r, data-types, echo: TRUE, warning: FALSE, message: FALSE}
+# Percentage of continuous and categorical variables and missing/incomplete rows/columns 
+plot_intro(sampleInfo)
+```
+
+##### Distributions of continuous variables and outlier detection
+```{r, cont-distrib, echo: TRUE, warning: FALSE, message: FALSE}
+plot_histogram(sampleInfo)
+```
+
+The distributions of the continuous variables show that thre are some outliers in the variables 
+`height`, `weight`, and `lv_mass`. These uncommon values can cause problems in the analysis,
+so I will handle it in the next step.
+
+##### Outlier detection and imputation
+
+The safest way to deal with outliers is to remove the samples with missing values, but assuming that 
+we want to keep all the samples to have a high statistical power, I will impute these values. 
+I will use the median value of the variable, which is a more robust measure of central 
+tendency than the mean.
+
+It is worth mentioning that this strategy of imputting missing values is the simplest one and
+there are more sophisticated methods for this process (i.e., regression, interpolation, multiple imputation, etc.). 
+However, for the purpose of this analysis, this method will be enough. This part of the analysis can 
+influence the results, so it is important to keep in mind this potential issues when interpreting the results.
+
+```{r, outliers, echo: TRUE, warning: FALSE, message: FALSE}
+# Create a function to detect and remove outliers from a continuous variable
+outlier_det_rem <- function(df, variable) {
+    # Calculate the interquartile range
+    quartiles <- quantile(df[, variable], probs = c(.25, .75), na.rm = TRUE)
+    IQR <- IQR(df[, variable], na.rm = TRUE)
+
+    # Calculate the upper and lower limits
+    Lower <- quartiles[1] - 1.5 * IQR
+    Upper <- quartiles[2] + 1.5 * IQR
+    
+    # Impute the outliers with the median value of the variable
+    df_no_outlier <- df %>%
+        mutate_at(variable, ~ ifelse(. < Lower | . > Upper, median(., na.rm = TRUE), .))
+    
+    # Return the df frame without outliers
+    return(df_no_outlier)
+}
+
+# Remove outliers from height, weight, and lv_mass variables
+sampleInfo <- outlier_det_rem(sampleInfo, "height")
+sampleInfo <- outlier_det_rem(sampleInfo, "weight")
+sampleInfo <- outlier_det_rem(sampleInfo, "lv_mass")
+```
+
+Chekc that the outliers have been removed with box plots of the continuous variables
+```{r, box-plots-outliers, echo: TRUE, warning: FALSE, message: FALSE}
+# Create box plots of the continuous variables with outliers
+boxplot_height <- ggplot(sampleInfo, aes(y = height)) + geom_boxplot(outlier.colour = "red", outlier.shape = 8, outlier.size = 2)
+boxplot_weight <- ggplot(sampleInfo, aes(y = weight)) + geom_boxplot(outlier.colour = "red", outlier.shape = 8, outlier.size = 2)
+boxplot_lv_mass <- ggplot(sampleInfo, aes(y = lv_mass)) + geom_boxplot(outlier.colour = "red", outlier.shape = 8, outlier.size = 2)
+
+# Arrange all the plots in a single grid
+combined_boxplot <- cowplot::plot_grid(boxplot_height, boxplot_weight, boxplot_lv_mass, 
+                               align = "hv", ncol = 2, nrow = 2)
+
+combined_boxplot
+```
+
+There is still one outlier in the `weight` variable, so I will apply the same function 
+again to remove it.
+```{r, outliers-2, echo: TRUE, warning: FALSE, message: FALSE}
+# Remove outliers from weight variable
+sampleInfo <- outlier_det_rem(sampleInfo, "weight")
+```
+
+If you run the chunk above to plot the boxplots, you will see that the outlier has been removed.
+
+##### Distributions of categorical variables
+```{r, cat-distrib, echo: TRUE, warning: FALSE, message: FALSE}
+plot_bar(sampleInfo)
+```
+
+In the case of the categorical variables, we can see tha the `afib`, `VTVF`, `Diabetes`,
+and `Hypertension` variables have a few missing values, which we will handle in the next step. Also, we can 
+see that the variable `minexpr` has only one value, so it will not be useful for the analysis, and
+I will remove it from the data frame.
+
+```{r, remove-column, echo: TRUE, warning: FALSE, message: FALSE}
+sampleInfo <- sampleInfo %>%
+    select(-minexpr)
+```
+
+##### Proportions of missing values per variable
+```{r, missing_values, echo: TRUE, warning: FALSE, message: FALSE}
+plot_missing(sampleInfo)
+```
+
+By looking at the proportions of missing values per variable, the variable 
+`lv_mass` has 56.5% of missing values, which is a lot and I will remove it from the data frame.
+
+```{r, remove-column2, echo: TRUE, warning: FALSE, message: FALSE}
+sampleInfo <- sampleInfo %>%
+    select(-lv_mass)
+```
+
+The `LVEF` has 21.86% of missing values and other seven variables less than 2%, which are 
+inside the acceptable range. But, I will handle the missing values in the next part.
+
+##### Impute missing values in continuous and categorical variables
+Here, for the continuous variables, I will use the same strategy as foe the outliers, 
+which is to impute the outliers with the median value of the variable. For the categorical variables,
+I will use the mode, which is the most frequent value of the variable. The same caveats as before
+apply to this part of the analysis.
+
+```{r, impute-cat, echo: TRUE, warning: FALSE, message: FALSE}
+# Create function to calculate mode
+getmode <- function(v) {
+   uniqv <- unique(v)
+   uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+
+# Impute missing values in categorical variables with the mode and in continuous variables with the median
+sampleInfo_noNA <- sampleInfo %>%
+    mutate(across(c(afib, VTVF, Diabetes, Hypertension), ~replace_na(.x, getmode(.x)))) %>%
+    mutate(across(c(height, RIN, hw, LVEF), ~replace_na(.x, median(.x, na.rm = TRUE))))
+```
+
+It is important to check that the missing values have been imputed correctly in the new data frame.
+```{r, checkNas-final, echo: TRUE, warning: FALSE, message: FALSE}
+plot_missing(sampleInfo_noNA)
+```
+
+Now, there are no missing values in the data frame.
+
+##### Scatter plots and correlation values of continuous variables
+```{r, scatter-plots, echo: TRUE, warning: FALSE, message: FALSE}
+# Create plot of scatter plots and correlation values of continuous variables
+corr_plot_covariates <- ggcorrm(data = sampleInfo_noNA) +
+  theme_corrm(base_size = 6) +
+  theme(axis.text.x = element_text(angle = 90, size = 8),
+        axis.text.y = element_text(size = 8),
+        strip.text.x = element_text(size = 7.5),
+        strip.text.y = element_text(size = 7.5),
+        legend.text = element_text(size = 8),
+        legend.title = element_text(size = 8)) +
+  lotri(geom_point(alpha = 0.5)) +
+  lotri(geom_smooth(colour = "red4")) +
+  utri_heatmap(alpha = 0.5, corr_method = "spearman") +
+  utri_corrtext(corr_method = "spearman", size = 4) +
+  dia_histogram(lower = 0.1, fill = "grey80", color = 1) +
+  dia_density(lower = 0.1, alpha = .1, colour = "red4") +
+  scale_fill_gradient2(low = "white", mid = "red3", high = "red4",
+                       midpoint = 0.5, space = "rgb",
+                       guide = guide_colorbar(title = "Correlation coefficient"),
+                       limits = c(-1, 1))
+corr_plot_covariates
+```
+
+The scatter plots and correlation values of the continuous variables show that `height`, `weight`, 
+and `hw` are highly correlated with each other, so only one of them should
+be selected for the differential expression analysis (to avoid multicollinearity).
+
+##### Correlation analysis of categorical variables
+```{r, cat-correlation, echo: TRUE, warning: FALSE, message: FALSE}
+# Create plot of correlation analysis of categorical variables
+sampleInfo_noNA %>%
+    select(-c(Library.Pool, disease_race, tissue_source)) %>%
+    plot_correlation(type = "d")
+```
+
+The correlation analysis of the categorical variables shows that `afib`, `VTVF`,
+and `etiology` are highly correlated with each other. So, I will not use `afib` and `VTVF` in the
+differential expression analysis as covariates because they could reduce the percentage of variance
+explained by the `etiology`, which is the main interest of this analysis.
+
+##### Boxplots of continuous variables by etiology
+```{r, box-plots-cov, echo: TRUE, warning: FALSE, message: FALSE}
+# Create boxplots of continuous variables by etiology
+plot_boxplot(sampleInfo_noNA, by = "etiology")
+```
+
+The boxplots of the continuous variables by etiology show that the variables `age`, `hw`,
+and `LVEF` are associated with the etiology of the samples (i.e. they separate the different
+etiologies in the boxplots). So, I will not use these variables as covariates in the differential
+expression analysis because they can reduce the percentage of variance explained by the `etiology`,
+which is the main interest of this analysis.
+
+##### Create a report of the EDA analysis of the co-variate data
+It is possible to create an html file with a report of the EDA analysis, which will be useful 
+for sharing the results with others. The report will be saved in the `Outputs`.
+
+```{r, data-report, echo: TRUE, warning: FALSE, message: FALSE}
+# Create a data report
+sampleInfo_noNA %>% DataExplorer::create_report(
+                            output_file = "EDA_report_covariates_MAGNet",
+                            report_title = "Data report for MAGNet co-variate data", 
+                            y = "etiology")
+
+# Open the data report in the browser. If this does not work, open the file manually
+# by clicking on the file generated in the current folder.
+browseURL("EDA_report_covariates_MAGNet.html")
+```
+
+##### Create a table with the participant characteristics
+
+I will include some variables that can be important to consider for the HF etiologies. The rows of 
+the table will be the different etiologies and the columns will be the different variables. I will
+save the table as a tsv file in the work directory.
+```{r, table-participants, echo: TRUE, warning: FALSE, message: FALSE}
+# Create a table with the participant characteristics
+summ_table <- sampleInfo_noNA %>%
+  group_by(etiology) %>%
+  summarise(
+    n = n(),
+    n_male = sum(gender == "Male"),
+    n_female = sum(gender == "Female"),
+    n_cauc = sum(race == "Caucasian"),
+    n_aa = sum(race == "AA"),
+    diabetes = sum(Diabetes == "Yes"),
+    hypertension = sum(Hypertension == "Yes"),
+    age_mean = round(mean(age), 2),
+    age_sd = round(sd(age), 2),
+    weight_mean = round(mean(weight), 2),
+    weight_sd = round(sd(weight), 2),
+    height_mean = round(mean(height), 2),
+    height_sd = round(sd(height), 2),
+    hw_mean = round(mean(hw), 2),
+    hw_sd = round(sd(hw), 2),
+    lvef_mean = round(mean(LVEF), 2),
+    lvef_sd = round(sd(LVEF), 2)
+  ) %>%
+  unite("age", c(age_mean, age_sd), remove = TRUE, sep = "±") %>%
+  unite("weight", c(weight_mean, weight_sd), remove = TRUE, sep = "±") %>%
+  unite("height", c(height_mean, height_sd), remove = TRUE, sep = "±") %>%
+  unite("heart weight", c(hw_mean, hw_sd), remove = TRUE, sep = "±") %>%
+  unite("lvef", c(lvef_mean, lvef_sd), remove = TRUE, sep = "±")
+
+colnames(summ_table) <- c("Etiology", "Number of participants", "Males", 
+                          "Females", "Caucasians", "African Americans",
+                          "Diabetes", "Hypertension", "Age", "Weight (kg)",
+                          "Height (cm)", "Heart weight (g)", "Left ventricular ejection fraction (%)")                          
+
+# Export the table as a tsv file in the working directory
+write_tsv(summ_table, "summary_table.tsv")
+```
+
+The `flextable` package can be used to create publication-ready tables. I will create a table with
+the participant characteristics and show it in the R Markdown document. However, the previous 
+tsv file is more flexible to use in other documents.
+
+```{r, table-participants-pub, echo: TRUE, warning: FALSE, message: FALSE}
+# Function to add formatting to tables
+formated_table <- function(data){
+  data %>%
+    flextable() %>%
+    autofit() %>% # autoadjust column width
+    fix_border_issues(part = "all") %>%
+    bold(part = "header") %>% # headers in bold
+    align(align = "center", part = "all") # align all text to center
+}
+
+# Create a publication-ready table
+final_table <- formated_table(summ_table)
+
+# Show the table
+final_table
+```
+
+## 2. Diagnostic plots
+
+### 2.1. At least one data distribution figure (e.g. boxplots, density plots).
+#### Create dataframes with information of the samples in each disease category
+```{r etiology-dfs, echo: TRUE, warning: FALSE, message: FALSE}
+# Create a vector of the names of etiologies
+names_et <- summ_table$Etiology
+
+# Get the names of the samples per etiology
+for (i in names_et){
+    # Define the name of the dataframes with the list of samples per etiology
+    var_name <- paste(i, "columns", sep = "_")
+    # Get the dataframes with the list of sample names per etiology
+    df <- rownames_to_column(sampleInfo, var = "sample") %>%
+              filter(etiology == i) %>%
+              select(sample) %>%
+              pull(sample)
+    # Assign the names to the dataframes
+    assign(var_name, df)
+}
+
+# Create dataframes with the samples per etiology
+NF_data <- gxData_cpm %>%
+           select(all_of(NF_columns)) %>%
+           pivot_longer(cols = NF_columns,
+           names_to = "sample",
+           values_to = "expression") %>%
+           mutate(etiology = "NF")
+
+DCM_data <- gxData_cpm %>%
+           select(all_of(DCM_columns)) %>%
+           pivot_longer(cols = DCM_columns,
+           names_to = "sample",
+           values_to = "expression") %>%
+           mutate(etiology = "DCM")
+
+HCM_data <- gxData_cpm %>%
+           select(all_of(HCM_columns)) %>%
+           pivot_longer(cols = HCM_columns,
+           names_to = "sample",
+           values_to = "expression") %>%
+           mutate(etiology = "HCM")
+
+PPCM_data <- gxData_cpm %>%
+           select(all_of(PPCM_columns)) %>%
+           pivot_longer(cols = PPCM_columns,
+           names_to = "sample",
+           values_to = "expression") %>%
+           mutate(etiology = "PPCM")
+
+# Join the dataframes
+etiology_data <- bind_rows(NF_data, DCM_data, HCM_data, PPCM_data)
+```
+
+#### Density plots of samples per etiology
+```{r, density-plot-samples, echo: TRUE, warning: FALSE, message: FALSE}
+# Create ggplot object with the plot
+den_plot_samples <- ggplot(data=etiology_data, aes(x = expression, group = etiology, fill = etiology)) +
+    geom_density(adjust = 1.5, alpha = 0.20) +
+    labs(x = "log2(CPM)",
+         y = "Density",
+         title = "Samples distributions per etiology",
+         fill = "Etiology") +
+    theme_bw() +
+    theme(
+      plot.title = element_text(face = "bold", size = 12),
+      legend.position = "right",
+      panel.spacing = unit(0.1, "lines"),
+      axis.ticks.x = element_blank()
+    ) + scale_color_npg()
+
+# Export the plot as a png file in the working directory
+ggsave("density_plot_samples.png", plot = den_plot_samples)
+
+# Show the plot
+den_plot_samples
+```
+
+The plot shows that the log-CPM distibutions of samples are similar across all the etiology groups (NF, DCM, HCM, and PPCM).
+All of the curves have an apparent bi-modal distribution, and there are some samples with low expression values (log-CPM < 5)
+in all the etiology groups. This pattern is expected, as the dataset is already log transformed, which means that the
+expression values are already normalised. However, it is good to do this check to ensure that the data is not too skewed.
+
+#### Density plots of all individual samples per etiology
+```{r, density-plot-indivsamples, echo: TRUE, warning: FALSE, message: FALSE}
+# Create ggplot object with the plot
+den_plot_indivsamples <- ggplot(data=etiology_data, aes(x = expression, group = sample, color = sample)) +
+    geom_density(adjust = 1.5) +
+    facet_wrap(~etiology) +
+    labs(x = "log2(CPM)",
+          y = "Density",
+         title = "Individual samples distributions per etiology") +
+    theme_bw() +
+    theme(
+      plot.title = element_text(face = "bold", size = 12),
+      legend.position = "none",
+      panel.spacing = unit(0.1, "lines"),
+      axis.ticks.x = element_blank()
+    )
+
+# Export the plot as a png file in the working directory
+ggsave("den_plot_indivsamples.png", plot = den_plot_indivsamples)
+
+# Show the plot
+den_plot_indivsamples
+```
+
+The figure reflects a similar pattern to the previous plot, but here it is shown that some samples from 
+the DCM group have an abnormal distribution (i.e., high peaks at the beginning of the distribution). 
+This aspect should be taken into account when analysing the data, and if neccesary, the samples should be removed.
+Other than that, the individual distributions of the samples are similar across all the etiology groups.
+
+#### Violin plots of NF patients
+```{r boxplot, echo: TRUE, warning: FALSE, message: FALSE}
+# Create function to create violin plot with the expression of the genes
+violinplot_cmp <- function(dataset, colnames, first_col, last_col, yaxis){
+    plot <- dataset %>%
+    filter(sample %in% colnames[first_col:last_col]) %>% 
+    ggplot(aes(x = expression, y = sample)) +
+    geom_violin(width = 0.8, size = 0.3) +
+    stat_summary(fun.data = mean_sdl, geom = "pointrange", size = 0.025) +
+    theme_bw() +
+    labs(y = yaxis) +
+    theme(
+      legend.position = "none",
+      panel.spacing = unit(0.1, "lines"),
+      axis.title.x = element_blank()
+    )
+}
+
+NF_vplot1 <- violinplot_cmp(NF_data, NF_columns, 1, 28, "Sample")
+NF_vplot2 <- violinplot_cmp(NF_data, NF_columns, 29, 56, "")
+NF_vplot3 <- violinplot_cmp(NF_data, NF_columns, 57, 84, "")
+NF_vplot4 <- violinplot_cmp(NF_data, NF_columns, 85, 112, "Sample")
+NF_vplot5 <- violinplot_cmp(NF_data, NF_columns, 112, 140, "")
+NF_vplot6 <- violinplot_cmp(NF_data, NF_columns, 140, 166, "")
+
+# Arrange all the plots in a single grid
+combined_vplot <- cowplot::plot_grid(NF_vplot1, NF_vplot2, NF_vplot3, NF_vplot4, NF_vplot5, NF_vplot6,
+                               align = "hv", ncol = 3, nrow = 2)
+
+# Create a title for the plot
+title <- ggdraw() +
+  draw_label(
+    "Samples distributions of non failure (NF) patients",
+    fontface = 'bold',
+    x = 0, hjust = 0
+  ) +
+  theme(
+    plot.margin = margin(0, 0, 0, 7) # add margin on the left of the drawing canvas 
+  )
+
+# Combine the title with the grid of plots;
+# rel_heights values control vertical title margins
+combined_vplot <- cowplot::plot_grid(title, combined_vplot, ncol = 1, rel_heights = c(0.1, 1))
+
+# Export the plot as a png file in the working directory
+ggsave("violin_plot.png", plot = combined_vplot, width = 13, height = 10)
+
+# Show the plot
+combined_vplot
+```
+
+The results of the violin plots are consistent with the density plots of NF patients. These plots 
+show the bimodal shape of the distribution of the samples, but also they represent some statistical 
+metrics such as the mean, quartiles, and the interquartile range of the expression values. 
+
+It is possible to apply the same function and code to the other etiologies. You only need to change the arguments for the `violinplot_cmp` function with 
+the corresponding datasets and number of samples per subplot. However, the plots are not shown here to avoid cluttering the document with redundant code and plots.
+
+### 2.b: At least one PCA figure showing the sample clustering colored by relevant co-variates.
+
+#### Calculate the PCAs
+```{r pca, echo: TRUE, warning: FALSE, message: FALSE}
+# Transpose the data to have the samples as rows and the genes as columns
+t_gxData_cpm <- t(gxData_cpm)
+
+# Calculate PCA from the expression data
+pca_gxcmp <- pca(t_gxData_cpm, method = "svd", nPcs = 5)
+
+# Get a short summary on the calculated model
+summary(pca_gxcmp)
+```
+
+#### Plot the PCAs with ggplot
+First, I will create a PCA plot of the gene expression data colored by tissue source and shaped by the
+etiology.
+
+```{r pca-plot, echo: TRUE, warning: FALSE, message: FALSE}
+# Merge pca scores with metadata
+df_gxcmp <- merge(scores(pca_gxcmp), sampleInfo_noNA, by = 0)
+
+# Create PCA flot of the gene expression data colored by tissue source and shaped by the etiology
+pca_plot_et <- ggplot(df_gxcmp, aes_string("PC1", "PC2", color = "tissue_source", shape = "etiology")) +
+  geom_point(alpha = 0.9, size = 2.2) +
+  labs(x = paste("PC1 (", pca_gxcmp@R2[1] * 100, "% of the variance)"),
+        y = paste("PC2 (", pca_gxcmp@R2[2] * 100, "% of the variance)"),
+        color = "Tissue",
+        shape = "Etiology") +
+  theme_bw() +
+  theme(
+    legend.position = "right",
+    panel.spacing = unit(0.1, "lines")
+  )
+
+# Export the plot as a png file in the working directory
+ggsave("pca_etiology.png", plot = pca_plot_et, width = 13, height = 10)
+
+# Show the plot
+pca_plot_et
+```
+This plot shows that the samples are separated by the tissue source and etiology. It is clear 
+that the samples from non failure patients (colored in turquoise) are separated from the samples
+from failure patients (colored in salmon). Also, the shapes of the samples show the separation
+between healthy and diseased samples.
+
+Considering the results of the exploratory data analysis, I will create additional PCA plots of the 
+gene expression data colored by covariates that are not associated or correlated with the etiology 
+of the samples (`gender`, `race`, `weight`, `height`, `Diabetes`, and `Hypertension`). These plots 
+will help to determine the covariates for the differential gene expression analysis.
+
+```{r pca-plot2, echo: TRUE, warning: FALSE, message: FALSE}
+# Function to create a PCA plot with ggplot
+pca_plot <- function(df, cov_color, cov_lab_name, xlab, ylab){
+  # Create ggplot object with the plot
+  plot <- ggplot(df, aes_string("PC1", "PC2", color = cov_color)) +
+    geom_point(alpha = 0.9, size = 2.2) +
+    labs(x = xlab,
+         y = ylab,
+         color = cov_lab_name) +
+    theme_bw() +
+    theme(
+      legend.position = "right",
+      panel.spacing = unit(0.1, "lines")
+    )
+    return(plot)
+}
+
+# PCA plot of gene expression and gender
+pca_plot_gender <- pca_plot(df_gxcmp, "gender", "Gender", "", 
+                            paste("PC2 (", pca_gxcmp@R2[2] * 100, "% of the variance)"))
+
+# PCA plot of gene expression and race
+pca_plot_race <- pca_plot(df_gxcmp, "race", "Race", "", "")
+
+# PCA plot of gene expression and diabetes
+pca_plot_diabetes <- pca_plot(df_gxcmp, "Diabetes", "Diabetes", "",
+                              paste("PC2 (", pca_gxcmp@R2[2] * 100, "% of the variance)"))      
+
+# PCA plot of gene expression and hypertension
+pca_plot_gender_hypert <- pca_plot(df_gxcmp, "Hypertension", "Hypertension", "", "")
+
+# PCA plot of gene expression and weight
+pca_plot_gender_weight <- pca_plot(df_gxcmp, "weight", "Weight",
+                                    paste("PC1 (",pca_gxcmp@R2[1] * 100, "% of the variance)"),
+                                    paste("PC2 (", pca_gxcmp@R2[2] * 100, "% of the variance)"))
+
+# PCA plot of gene expression and hypertension
+pca_plot_gender_height <- pca_plot(df_gxcmp, "height", "Height", 
+                                    paste("PC1 (",pca_gxcmp@R2[1] * 100, "% of the variance)"), "")
+
+# Arrange all the plots in a single grid
+combined_pcaplot <- cowplot::plot_grid(pca_plot_gender, pca_plot_race,
+                               pca_plot_diabetes, pca_plot_gender_hypert,
+                               pca_plot_gender_weight, pca_plot_gender_height,
+                               align = "hv", ncol = 2, nrow = 3)
+
+# Create a title for the plot
+title <- ggdraw() +
+  draw_label(
+    "PCA plots of the gene expression from all the samples colored by relevant covariates",
+    fontface = 'bold',
+    x = 0, hjust = 0
+  ) +
+  theme(
+    plot.margin = margin(0, 0, 0, 7) # add margin on the left of the drawing canvas 
+  )
+
+# Combine the title with the grid of plots;
+# rel_heights values control vertical title margins
+combined_pcaplot <- cowplot::plot_grid(title, combined_pcaplot, ncol = 1, rel_heights = c(0.1, 1))
+
+# Export the plot as a png file in the working directory
+ggsave("combined_pcaplot.png", plot = combined_pcaplot, width = 13, height = 10)
+
+# Show the plot
+combined_pcaplot
+```
+
+The PCA plots did not show any separation of the gene expression data by the covariates. So, according to 
+these results, it is not necessary to include the covariates in the differential gene expression analysis.
+However, if there is previous knowledge about the importance of the covariates on the relationship between
+the gene expression and the etiology, it is possible to include them in the analysis. 
+
+##  3. Statistical analysis
+
+### 3.a: Perform a differential gene expression analysis comparing DCM, HCM and PPCM patients to the healthy donors.
+```{r dge, echo: TRUE, warning: FALSE, message: FALSE}
+# Function to perform differential gene expression analysis
+dge_analysis <- function(design, gxData){
+    # Perform differential gene expression analysis
+    dge <- limma::lmFit(gxData, design)
+
+    # Make contrasts between the etiologies and healthy donors (NF)
+    contrasts <- makeContrasts(
+      DCM_vs_NF = etiologyDCM - etiologyNF,
+      HCM_vs_NF = etiologyHCM - etiologyNF,
+      PPCM_vs_NF = etiologyPPCM - etiologyNF,
+      levels = design
+    )
+
+    # Apply the contrasts to the model
+    dge_contrasts <- contrasts.fit(dge, contrasts)
+
+    # Perform empirical Bayes t-test
+    dge_contrasts <- eBayes(dge_contrasts, trend = TRUE)
+
+    # Return the results
+    return(dge_contrasts)
+}
+
+# Create design matrix with the etiology as the only covariate of interest
+design = model.matrix(~0 +  etiology, data = sampleInfo_noNA)
+
+# Perform differential gene expression analysis
+dge_results <- dge_analysis(design, gxData_cpm)
+
+# Get the results from the NF vs DCM comparison
+dge_results_DCM <- topTable(dge_results,
+                            number = nrow(gxData_cpm), coef = "DCM_vs_NF")
+
+# Get the results from the NF vs HCM comparison
+dge_results_HCM <- topTable(dge_results,
+                            number = nrow(gxData_cpm), coef = "HCM_vs_NF")
+
+# Get the results from the NF vs PPCM comparison
+dge_results_PPCM <- topTable(dge_results,
+                            number = nrow(gxData_cpm), coef = "PPCM_vs_NF")
+
+# Print the number of differentially expressed genes from all the comparisons
+# using a p-value of 0.05
+n_degs <- decideTests(dge_results, p.value = 0.05)
+print(summary(n_degs))
+
+# Create a ven diagram with the number of differentially expressed genes
+# from all the comparisons
+vennDiagram(n_degs, circle.col=c("turquoise", "salmon", "darkblue"))
+```
+
+The Venn diagram shows that with a p-value of 0.05, there are 7058 differentially expressed genes
+in all the comparisons. The DCM_vs_NF has the highest number of DE genes, followed by HCM_vs_NF 
+and PPCM_vs_NF. The number of DE genes is very high, which could be corrected by using a stricter p-value
+or other measures of significance (e.g., the log-fold-change to be above a minimum value). Also, it is 
+possible to use other methods for DEG analysis (e.g., edgeR, DESeq2, etc) to see if the results are
+consistent. In general, the methods and parameters used for DEG analysis depend on the specific
+research question and the data.
+
+### 3.b: Correct for relevant co-variates and add comments to the scripts explaining your choices.
+
+As mentioned in the previous section, the PCA plots did not show any separation of the gene expression data colored by the covariates.
+I will use the [variancePartition package](https://bioconductor.org/packages/release/bioc/html/variancePartition.html) to help me 
+decide which covariates to include in the model. This package use a linear mixed model to partition the variance attributable to 
+multiple variables in the data. So, the idea will be to discover the covariates that explain the most variance in the data, but 
+that are not related to the etiology.
+
+I will use the same covariates as in the PCA plots  (`gender`, `race`, `weight`, `height`, `Diabetes`, 
+and `Hypertension`) for the reasons mentioned in the previous section.
+
+```{r variance-partition, echo: TRUE, warning: FALSE, message: FALSE}
+# Specify variables to consider - all
+form <- ~ etiology + gender + race + weight + height + Diabetes + Hypertension
+
+# Fit model and extract results
+varpart <- fitExtractVarPartModel(gxData_cpm, form, sampleInfo_noNA)
+
+# Sort variables (i.e. columns) by median fraction of variance explained
+vp <- sortCols(varpart)
+
+# Violin plot of the results from the variance partition analysis
+vp_plot <- plotVarPart(vp)
+
+# Save the plot in the working directory 
+ggsave("covariates_analysis.png", plot = vp_plot)
+
+# Show the plot
+vp_plot
+```
+
+The violin plot of the variance explanation shows that after the etiology, the covariates that 
+explain the most variance in the data are `height`, `gender`, and `weight`. In the EDA section,
+I noticed that the `weight` and `height` covariates were highly correlated, so I will only include
+the `height` and `gender` covariates in the model.
+
+Besides the methods used to find the covariates to include in the model (PCA plots and variance partition analysis),
+it is possible to take this decision based on the biological knowledge of the data and relevant literature.
+
+```{r dge-correct-cov, echo: TRUE, warning: FALSE, message: FALSE}
+# Create design matrix with the etiology and the covariates of interest
+designcov = model.matrix(~0 +  etiology + height + gender, data = sampleInfo_noNA)
+
+# Perform differential gene expression analysis
+dge_results_cov <- dge_analysis(designcov, gxData_cpm)
+
+# Get the results from the NF vs DCM comparison
+dge_results_DCM_cov <- topTable(dge_results_cov,
+                            number = nrow(gxData_cpm), coef = "DCM_vs_NF")
+
+# Get the results from the NF vs HCM comparison
+dge_results_HCM_cov <- topTable(dge_results_cov,
+                            number = nrow(gxData_cpm), coef = "HCM_vs_NF")
+
+# Get the results from the NF vs PPCM comparison
+dge_results_PPCM_cov <- topTable(dge_results_cov,
+                            number = nrow(gxData_cpm), coef = "PPCM_vs_NF")
+
+# Print the number of differentially expressed genes from all the comparisons
+n_degs_cov <- decideTests(dge_results_cov, p.value = 0.05)
+print(summary(n_degs_cov))
+
+# Create a ven diagram with the number of differentially expressed genes
+# from all the comparisons
+vennDiagram(n_degs_cov, circle.col=c("turquoise", "salmon", "darkblue"))
+```
+
+After correcting for the covariates, the number of DE genes is 7160, which is a small increase compared to the
+number of DE genes found in the previous section (7058). The number of DE genes is still very high, which could be 
+corrected with the ideas mentioned in the previous section. 
+
+One limitation of the Ven diagram is that it does not show the up and down regulated genes, which could be
+useful to understand the biological meaning of the DE genes. This information can be shown in a volcano plot.
+
+## 4. Additional gene annotation
+### 4.a: Retrieve gene symbols and gene names based on the provided Ensembl gene identifiers.
+Besides the gene symbols and names, I will also retrieve the chromosome names because 
+it will be useful in the next section.
+
+```{r ensembl-ids, echo: TRUE, warning: FALSE, message: FALSE}
+# Choose the Ensembl database and set the host
+ensembl <- useMart("ENSEMBL_MART_ENSEMBL", dataset = "hsapiens_gene_ensembl")
+
+# Search the specific attibute names of gene names, gene symbols, and chromosome names
+symbol_att <- searchAttributes(mart = ensembl, pattern = "symbol")
+names_att <- searchAttributes(mart = ensembl, pattern = "gene_name")
+chr_att <- searchAttributes(mart = ensembl, pattern = "chromosome")
+
+# Retrieve the row names of the data frame with the Ensembl gene identifiers
+ensembl_geneIds <- rownames(gxData_cpm)
+
+# Retrieve gene symbols, gene names, and chromosome names for the specified Ensembl gene identifiers
+ensembl_results <- getBM(attributes=c("ensembl_gene_id", "external_gene_name", "hgnc_symbol", "chromosome_name"),
+                 filters = "ensembl_gene_id",
+                 values = ensembl_geneIds,
+                 mart = ensembl)
+
+# Add geneid as row names
+rownames(ensembl_results) <- ensembl_results$ensembl_gene_id
+
+# Remove the ensembl_gene_id column
+ensembl_results <- ensembl_results[, -1]
+```
+
+### 4.b: Merge this additional annotation with the gene expression data object.
+```{r merge-ensembl-ids, echo: TRUE, warning: FALSE, message: FALSE}
+# Merge the Ensembl results with the gene expression data
+gxData_cpm_ensembl <- merge(ensembl_results, gxData_cpm, by = "row.names")
+
+# Add the Row.names column as row names again
+rownames(gxData_cpm_ensembl) <- gxData_cpm_ensembl$Row.names
+
+# Remove the Row.names column
+gxData_cpm_ensembl <- gxData_cpm_ensembl[, -1]
+```
+
+## 5. Relative expression levels
+### 5.a: Transform the data to FPKM values; use the function from the skills trainings.
+
+```{r convert-fpkm, echo: TRUE, warning: FALSE, message: FALSE}
+# Convert CPM expression values into FPKM
+cpm2fpkm <- function(x) {
+    t <- 2^(x) * 1E3 / geneTotExonLengths[, 1]
+}
+
+gxData_fpkm <- cpm2fpkm(gxData_cpm)
+```
+
+### 5.b-c: Assess for each gene in the dataset whether it is expressed above background (noise) level. 
+For example: you can base this on comparing the average expression of a gene to the average expression of Y 
+chromosome genes in female subjects.
+
+First, I will create a dataframe with the expression of the Y chromosome genes from female subjects. 
+
+```{r backg-level1, echo: TRUE, warning: FALSE, message: FALSE}
+# Select female columns from the sampleInfo data frame
+female_cols <- rownames_to_column(sampleInfo_noNA, var = "sample") %>%
+        filter(gender == "Female") %>%
+        select(sample) %>%
+        pull(sample)
+
+# Filter the gene expression of female subjects
+female_gx <-  gxData_fpkm %>%
+        select(all_of(female_cols))
+
+# Get the gene ids of the Y chromosome genes from the gene expression dataset
+ch_y_genes <- gxData_cpm_ensembl %>%
+        rownames_to_column(var = "geneID") %>%
+        filter(chromosome_name == "Y") %>%
+        pull(geneID)
+
+# Select the Y chromosome genes from the female gene expression dataset with the FPKM values
+female_chy_gx <-  female_gx %>%
+        rownames_to_column(var = "geneID") %>%
+        filter(geneID %in% ch_y_genes) %>%
+        column_to_rownames(var = "geneID")
+```
+
+Now, I will calculate the average expression of the Y chromosome genes from the female samples. 
+
+```{r backg-level2, echo: TRUE, warning: FALSE, message: FALSE}
+# Average expression of the Y chromosome genes from all the female samples
+# Calculate the number of all values in the dataframe
+n_values <- dim(female_chy_gx)[1]*dim(female_chy_gx)[2]
+
+# Calculate the sum of all values in the dataframe
+total_sum <- female_chy_gx %>% 
+  # Use the map_dbl function to apply the sum function to each column
+  map_dbl(sum) %>% 
+  # Use the reduce function to sum all the sums
+  reduce(sum)
+
+# Calculate the mean of the average expressions of the Y chromosome genes
+mean_all_chy_gx <- total_sum / n_values
+```
+
+The simplest way to do the comparison is to calculate the average expression of each gene in the dataset, 
+compare it to the average expression of the Y chromosome genes from female subjects, and add a column to 
+the data frame with these results (above or below background level). I will implement this method below. 
+
+```{r backg-level3, echo: TRUE, warning: FALSE, message: FALSE}
+# Create a new dataframe to store the results
+back_results <- data.frame(matrix(ncol = 2, nrow = nrow(gxData_fpkm)))
+colnames(back_results) <- c("gx_mean", "background_exp_simple_comp")
+rownames(back_results) <- rownames(gxData_fpkm)
+
+# Take the average expression of all of the genes in the fpkm dataset
+back_results <- gxData_fpkm %>%
+        mutate(gx_mean = pmap(., lift_vd(mean))) %>%
+        select(gx_mean)
+
+# Compare the average expression of each gene to the average expression of the Y chromosome genes
+# and add a column to the data frame with the results of this comparison (above or below background level)
+
+back_results <- back_results %>%
+        mutate(background_exp_simple_comp = ifelse(gx_mean > as.numeric(mean_all_chy_gx), "above", "below"))
+
+# Create a bar plot to visualize the results of the comparison
+plot_back <- back_results %>%
+        ggplot(aes(x = background_exp_simple_comp, fill = background_exp_simple_comp)) +
+        geom_bar() +
+        theme_bw() +
+        labs(x = "", y = "Number of genes", title = "Number of genes above and below background noise with simple comparison")+
+        theme(legend.title=element_blank())
+
+# Show plot
+plot_back
+```
+
+A better way to do this comparison is to do a one sample t-test. This approach is more accurate
+because it evaluates the statistically significant differences between the mean of the expression per gene and the
+average expression of the Y chromosome genes. However, this test rely on some assumptions (e.g., normality distribution),
+which are not always met. In this case, I will apply try it out and see if the results are similar to the previous approach.
+
+```{r backg-level4, echo: TRUE, warning: FALSE, message: FALSE}
+# Calculate the t-test for each row
+# Create a new dataframe to store the results
+back_ttest_results <- data.frame(matrix(ncol = 2, nrow = nrow(gxData_fpkm)))
+colnames(back_ttest_results) <- c("p_value_background", "background_exp_ttest")
+rownames(back_ttest_results) <- rownames(gxData_fpkm)
+
+# Loop through the rows of the dataframe and calculate the t-test for each row
+for (i in 1:nrow(gxData_fpkm)) {
+  # Calculate the t-test for each row
+  t_test <- t.test(gxData_fpkm[i,], mu = mean_all_chy_gx)
+  # Add the p-value to a new dataframe column
+  back_ttest_results[i, "p_value_background"] <- t_test$p.value
+  # Add a column with the above or below background level
+  if (t_test$p.value < 0.05) {
+    back_ttest_results[i, "background_exp_ttest"] <- "above"
+  } else {
+    back_ttest_results[i, "background_exp_ttest"] <- "below"
+  }
+}
+```
+
+The following plot shows the results of the t-test.
+
+```{r backg-level5, echo: TRUE, warning: FALSE, message: FALSE}
+# Create a bar plot to visualize the results of the comparison
+plot_back_ttest <- back_ttest_results %>%
+        ggplot(aes(x = background_exp_ttest, fill = background_exp_ttest)) +
+        geom_bar() +
+        theme_bw() +
+        labs(x = "", y = "Number of genes", title = "Number of genes above and below background noise with t-test")+
+        theme(legend.title=element_blank())
+
+# Arrange all the plots in a single grid
+combined_barplot_backnoise <- cowplot::plot_grid(plot_back, plot_back_ttest,
+                               align = "hv", ncol = 2, nrow = 1)
+
+# Export the plot as a png file in the working directory
+ggsave("combined_barplot_backnoise.png", plot = combined_barplot_backnoise, width = 15, height = 10)
+
+# Show the plot
+combined_barplot_backnoise
+```
+
+The number of genes above background level is higher in the t-test approach than in the simple one.
+Considering that we had a very high number of DE genes, it would be better to use the simple appraoch 
+because it would help to discard some genes that are being expressed below the background level. In this way, we would have a more limited list of DE genes. 
+
+Another possibility is applying a non-parametric test (e.g., Wilcoxon rank test), which does not rely 
+on the normality assumption.
+
+The best workflow would be to first verify the normality (and other) assumptions, and then apply the
+appropriate statistical test. But, this type of analysis is beyond the scope of the present assignment.
+
+
+## 6. Export the results
+* The exported file with results should be a tab-delimited text file.
+* The file should contain all the additionally generated data (e.g. statistics, annotation, expressed above background) with clear column names.
+* Do not include the original log2-transformed CPM values (or FPKM values) for each sample, to keep the results file manageable. However, for visualization
+purposes (e.g. pathway analysis) it is useful to have an average expression value for DCM and an average expression value for controls for each gene.
+
+```{r export-data, echo: TRUE, warning: FALSE, message: FALSE}
+# Create a function to add data to the results table
+add_data_to_results <- function(data, results_table, col_name, unnec_col=c()) {
+  # Add the data to the results table
+  results_table <- merge(results_table, data, by = "row.names", all.x = TRUE)
+  # Add the Row.names column as row names again
+  rownames(results_table) <- results_table$Row.names
+  # Remove the Row.names column
+  results_table <- results_table[, -1]
+  # Remove the unnecessary columns
+  if (length(unnec_col) != 0) {
+    results_table <- results_table[,!names(results_table) %in% unnec_col]
+  }
+  # Return the results table
+  return(results_table)
+}
+
+# Export the most important results of the DGE analysis
+# Create a new dataframe with the results
+dge_final_table <- data.frame(matrix(ncol = 0, nrow = nrow(gxData_cpm)))
+
+# Add the gene names to the dataframe as rownames
+rownames(dge_final_table) <- rownames(gxData_cpm)
+
+# Add the hgnc symbol and chromosome name to the dataframe
+dge_final_table <- add_data_to_results(ensembl_results, dge_final_table, "row.names")
+
+# Add p-values and log2 fold change of the DGE analysis with covariates
+# DCM vs NF
+dge_final_table <- add_data_to_results(dge_results_DCM_cov, dge_final_table, "row.names",
+                                        c("t", "B", "adj.P.Val"))
+# HCM vs NF
+dge_final_table <- add_data_to_results(dge_results_HCM_cov, dge_final_table, "row.names",
+                                        c("t", "B", "adj.P.Val", "AveExpr.x"))
+
+# PPCM vs NF
+dge_final_table <- add_data_to_results(dge_results_PPCM_cov, dge_final_table, "row.names",
+                                        c("t", "B", "adj.P.Val", "AveExpr.y"))
+
+# Add the results of the background noise analysis with the simple approach
+dge_final_table <- add_data_to_results(back_results, dge_final_table, "row.names")
+
+# Add the results of the background noise analysis with the t-test approach
+dge_final_table <- add_data_to_results(back_ttest_results, dge_final_table, "row.names")
+
+# Add the EnsemblID as a column 
+dge_final_table <- rownames_to_column(dge_final_table, "EnsembleID")
+
+# Add clear column names to the data frame
+colnames(dge_final_table) <- c("EnsembleID", "Gene_name", "Hgnc_symbol", "Chromosome", "log2FC_DCMvsNF", "pval_DCMvsNF", "log2FC_HCMvsNF", "pval_HCMvsNF",
+                               "log2FC_PPCMvsNF", "CPM_avg_gx", "pval_PPCMvsNF", "FPKM_avg_gx", "Background_exp_simple", 
+                                "pval_background_exp_ttes", "background_exp_ttest")
+
+# Export the table as a tsv file in the working directory
+write_tsv(dge_final_table, "results_table.tsv")
+```
+
+## Final remarks and possible further steps 
+There are some additional steps that can extend the analysis and provide more insight into the data. Some ideas are listed below.
+* Remove the unexpressed or lowly-expressed genes from the analysis (e.g. genes that are not expressed in any of the samples). 
+This step would be important because if these genes are not expressed in any condition, they are not of interest of the analysis.
+* Perform DGE analysis only for the genes that are expressed above background level.
+* Apply the voom transformation to the data to remove heteroscedascity from the data. This transformation estimates 
+the mean-variance relationship and use this to compute appropriate observation-level weights. 
+* Check the normality (and other) assumption(s) for parametric tests in the data and apply the appropriate statistical tests.
+* Perform further analysis on the DE genes (e.g. pathway analysis, gene set enrichment analysis, gene ontology analysis, etc).
