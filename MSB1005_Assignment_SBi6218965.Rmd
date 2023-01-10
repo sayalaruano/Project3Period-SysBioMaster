@@ -1,0 +1,334 @@
+===============================================================================
+ MSB1005_Assignment_SBi6218965.R
+
+ Date: Dec 23, 2022 ( Merry Christmas!)
+ Author: Sonia Balan, i6218965
+===============================================================================
+
+ **LIBRARIES**
+```{r}
+require(ggplot2)
+require(limma)
+require(tidyr)
+require(pcaMethods)
+require(rstudioapi)
+require(biomaRt)
+require(EnhancedVolcano)
+require(gridExtra)
+require(dplyr)
+```
+
+**DATA IMPORT**
+```{r}
+setwd(dirname(getActiveDocumentContext()$path)) 
+
+gx_data <- read.table('MAGNET_GeneExpressionData_CPM_19112020.txt', 
+                      row.names = 1,
+                      header = TRUE)
+
+sample_info <- read.csv('MAGNET_SampleData_18112022.csv',
+                        stringsAsFactors = TRUE)
+
+exon_lengths <- read.delim("MAGNET_exonLengths.txt",
+                           as.is = T,
+                           row.names = 1)
+```
+
+**SAMPLE CHARACTERISTICS**
+
+This section includes the comparison of all sample traits (from sample_info) with the following exceptions:
+  - tissue_source is not considered as it always corresponds to "donor" for healthy subjects and "cardioectomy" for HF subjects
+  - etiology is not considered because we are comparing all other traits with etiology
+  - RIN, Library.pool, minexpr, TIN.median. are not considered because they illustrate the quality or batch of the genetic material
+  - disease_race was not considered because we already compare the disease presence among different races
+  
+  A value corresponding to the percent of "the second value" is added to the summary for categorical traits. Usually this second trait means %diagnosed (ex. Diabetes), except for gender and race, where the second variable is "male" and "caucasian" respectively. Statistical difference between etiology groups is assessed with a chi square non-parametric test.
+  
+  For continuous variables, the data is split into a list that contains the sample traits for each etiology group separately and then the median value is added to the summary. The difference between etiology groups is assessed with both anova and a Tuckey HSD test. The p value from the anova test is added to the summary, however, the results for the Tuckey HSD pairwise comparison are displayed in the console.
+```{r}
+# summarizing relevant sample traits -------------------------------------------------------
+# selecting traits that are relevant to summarize the sample characteristics
+col_names = colnames(sample_info)
+sample_traits = col_names[!col_names %in% c("sample_name","tissue_source","etiology","RIN","Library.Pool","disease_race","minexpr","TIN.median.")]
+
+# initialize a dataframe to store all the summarized sample trait information and other variables
+rm(list = c("summarized")) # ensures the dataframe is empty at each iteration
+summarized = data.frame(DCM = numeric(), HCM = numeric(), NF = numeric(), PPCM = numeric()) 
+p_value = c()
+extra_rowname = c()
+nr_per_et = t(summary(sample_info$etiology))
+
+for (var in colnames(sample_info[sample_traits])){
+  if (is.factor(sample_info[,var])){
+    temp_table = table(sample_info$etiology, sample_info[,var])
+    
+    percentage = signif((temp_table[,2] /nr_per_et)*100,2)
+    chisq_res = chisq.test(temp_table)
+    p_value = rbind(p_value, chisq_res$p.value)
+    
+    summarized = rbind(summarized, percentage)
+    extra_rowname = append(extra_rowname, "(% diagnosed)")
+  } 
+  else {
+    var_by_etiology = with(sample_info,split(sample_info[,var],sample_info$etiology))
+    summarized = rbind(summarized, c(summary(var_by_etiology$DCM)[3], summary(var_by_etiology$HCM)[3], summary(var_by_etiology$NF)[3], summary(var_by_etiology$PPCM)[3]))
+    
+    tuckey_hsd_res = TukeyHSD(aov(sample_info[,var] ~ sample_info$etiology))
+    anova_res = anova(aov(sample_info[,var] ~ sample_info$etiology))
+    p_value = rbind(p_value, anova_res$`Pr(>F)`[1])
+    extra_rowname = append(extra_rowname, "(median)")
+    
+    print(var)
+    print(tuckey_hsd_res)
+    # when trying to compute the mean/median of var_by_etiology, nothing worked, so I chose to keep the median from the summary() function
+  }
+}
+
+# rename rows and columns in "summarized" to reflect etiology and sample and adding the p-values to the summary
+extra_rowname[1:2] = c("(% male)", "(% caucasian)")
+rownames(summarized) = paste(sample_traits, extra_rowname)
+colnames(summarized) = levels(sample_info$etiology)
+summarized$P_value = p_value
+
+# Export (as table and as png) --------------------------------------------------------------
+write.csv(summarized, "Sample_Trait_Summary.csv", row.names=T)
+
+png(filename = "Sample_Trait_Summary.png",
+    height = 25*nrow(summarized),
+    width = 150*ncol(summarized),
+    units = 'px')
+grid.table(summarized)
+dev.off()
+
+# clean workspace ---------------------------------------------------------------------------
+rm(list = c("extra_rowname", "nr_per_et", "var", "temp_table", "percentage", "var_by_etiology", "chisq_res" ,"tuckey_hsd_res", "anova_res", "p_value"))
+```
+
+**DIAGNOSTIC PLOTS**
+```{r}
+# splitting the gene data into groups according to etiology ---------------------------------
+samples_by_etiology = split(sample_info$sample_name, sample_info$etiology)
+
+NF_exp = gather(gx_data[,samples_by_etiology$NF],
+                key= 'Sample',
+                value= 'CPM')
+
+DCM_exp = gather(gx_data[,samples_by_etiology$DCM],
+                 key= 'Sample',
+                 value= 'CPM')
+
+HCM_exp = gather(gx_data[,samples_by_etiology$HCM],
+                 key= 'Sample',
+                 value= 'CPM')
+
+PPCM_exp = gather(gx_data[,samples_by_etiology$PPCM],
+                  key= 'Sample',
+                  value= 'CPM')
+All_exp = gather(gx_data,
+                 key = 'Sample',
+                 value = 'CPM')
+
+# Box plots --------------------------------------------------------------------------
+NF_boxplot = ggplot(NF_exp, aes(Sample,CPM)) +
+  geom_boxplot() +
+  ggtitle("Gene Expression Box Plot in Non-failing Samples")
+
+DCM_boxplot = ggplot(DCM_exp, aes(Sample,CPM)) +
+  geom_boxplot() +
+  ggtitle("Gene Expression Box Plot in DCM Samples")
+
+HCM_boxplot = ggplot(HCM_exp, aes(Sample,CPM)) +
+  geom_boxplot() +
+  ggtitle("Gene Expression Box Plot in HCM Samples")
+
+PPCM_boxplot = ggplot(PPCM_exp, aes(Sample,CPM)) +
+  geom_boxplot() +
+  ggtitle("Gene Expression Box Plot in PPCM Samples")
+
+All_boxplot = ggplot(All_exp, aes(Sample,CPM)) +
+  geom_boxplot() +
+  ggtitle("Gene Expression Box Plot in All Samples")
+
+# Density Plots ----------------------------------------------------------------------
+NF_density_plot = ggplot(NF_exp, aes(CPM, color = Sample)) +
+  geom_density(alpha = 0.1) +
+  theme(legend.position = 'none') +
+  ylab("Density") +
+  ggtitle("Gene Expression Density in Non-failing Samples")
+
+DCM_density_plot = ggplot(DCM_exp, aes(CPM, color = Sample)) +
+  geom_density(alpha = 0.1) +
+  theme(legend.position = 'none') +
+  ylab("Density") +
+  ggtitle("Gene Expression Density in DCM Samples")
+
+PPCM_density_plot = ggplot(PPCM_exp, aes(CPM, color = Sample)) +
+  geom_density(alpha = 0.1) +
+  theme(legend.position = 'none') +
+  ylab("Density") +
+  ggtitle("Gene Expression Density in PPCM Samples")
+
+HCM_density_plot = ggplot(HCM_exp, aes(CPM, color = Sample)) +
+  geom_density(alpha = 0.1) +
+  theme(legend.position = 'none') +
+  ylab("Density") +
+  ggtitle("Gene Expression Density in HCM Samples")
+
+All_density_plot = ggplot(All_exp, aes(CPM, color = Sample)) +
+  geom_density(alpha = 0.1) +
+  theme(legend.position = 'none') +
+  ylab("Density") +
+  ggtitle("Gene Expression Density in All Samples")
+
+# PCA --------------------------------------------------------------------------------
+pca_gx = pca(t(gx_data), nPcs=3)
+
+sample_info$PC1 = pca_gx@scores[,1]
+sample_info$PC2 = pca_gx@scores[,2]
+sample_info$PC3 = pca_gx@scores[,3]
+
+PCA_1v2_plot = ggplot(sample_info, aes(PC1, PC2,
+                                      color = etiology,
+                                      shape = gender)) + 
+  geom_point(alpha = 0.6) + 
+  xlab(paste("PC1 (",pca_gx@R2[1]*100,"%)")) + 
+  ylab(paste("PC2 (",pca_gx@R2[2]*100,"%)")) +
+  ggtitle("Principal Component Analysis of Data - PC1 vs. PC2")
+
+# clearing workspace ------------------------------------------------------------------------
+rm(list = c("samples_by_etiology", "NF_exp", "DCM_exp", "HCM_exp", "PPCM_exp", "All_exp"))
+```
+
+**STATISTICAL ANALYSIS**
+
+  Age and gender are used as covariates for the linear regresion as they are commonly used covariates that are known in literature to influence heart failure status. With the exception of height, all traits are significantly different between groups (i.e. correlate with the etiology phenotype), therefore they would not be suitable for use as covariates.
+  
+```{r}
+# Linear Regression ------------------------------------------------------------------
+design = model.matrix(~0 + etiology + gender + race + age, data = sample_info)
+
+cont_matrix = makeContrasts(DCMvNF = etiologyDCM - etiologyNF,
+                            HCMvNF = etiologyHCM - etiologyNF,
+                            PPCMvNF = etiologyDCM - etiologyNF,
+                            HFvNF = (etiologyDCM + etiologyHCM + etiologyPPCM) - etiologyNF,
+                            levels = design)
+
+fit <- lmFit(gx_data, design)
+fit <- contrasts.fit(fit, cont_matrix)
+fit <- eBayes(fit, trend = TRUE)
+
+DCM_diff = topTable(fit, number = nrow(gx_data), coef = "DCMvNF")
+HCM_diff = topTable(fit, number = nrow(gx_data), coef = "HCMvNF")
+PPCM_diff = topTable(fit, number = nrow(gx_data), coef = "PPCMvNF")
+HF_diff = topTable(fit, number = nrow(gx_data), coef = "HFvNF")
+```
+
+**GENE ANNOTATION**
+```{r}
+# retrieving annotation ---------------------------------------------------------------------
+# defining the mart object
+ensembl = useEnsembl(biomart = "genes", dataset = "hsapiens_gene_ensembl")
+
+# Annotating the gene expression dataset with gene name, gene symbol, chromosome name and gene description. This step can take a long time
+gene_annotation = getBM(attributes = c('ensembl_gene_id','external_gene_name', 'hgnc_symbol', 'chromosome_name', 'description','name_1006'),
+                        mart = ensembl,
+                        uniqueRows = T)
+
+# getting annotation data for the differentialy expressed genes
+gene_names = unique(c(rownames(HCM_diff), rownames(DCM_diff), rownames(PPCM_diff), rownames(HF_diff)))
+selected_genes = rbind(gene_annotation[is.element(gene_annotation$ensembl_gene_id,
+  gene_names),]) %>% distinct(ensembl_gene_id, .keep_all = T)
+colnames(selected_genes)[colnames(selected_genes) == "name_1006"] <- "GO_term"
+
+# adding annotation to the differential expression analysis----------------------------------
+colnames(DCM_diff) = paste("DCMvsNF_",colnames(DCM_diff))
+colnames(HCM_diff) = paste("HCMvsNF_",colnames(HCM_diff))
+colnames(PPCM_diff) = paste("PPCMvsNF_",colnames(PPCM_diff))
+colnames(HF_diff) = paste("HFvsNF_",colnames(HF_diff))
+
+deg_annotated = merge(selected_genes, HCM_diff, 
+                      by.x = "ensembl_gene_id", 
+                      by.y = "row.names") %>% distinct(ensembl_gene_id, .keep_all = T)
+deg_annotated = merge(deg_annotated, DCM_diff, 
+                      by.x = "ensembl_gene_id", 
+                      by.y = "row.names")
+deg_annotated = merge(deg_annotated, PPCM_diff, 
+                      by.x = "ensembl_gene_id", 
+                      by.y = "row.names")
+deg_annotated = merge(deg_annotated, HF_diff, 
+                      by.x = "ensembl_gene_id", 
+                      by.y = "row.names")
+
+# Uncomment to save gene annotation as an intermediate file
+# write.csv(gene_annotation, "Annotations_For_All_Measured_Genes.csv")
+```
+
+**RELATIVE EXPRESSION LEVELS**
+```{r}
+# Uncomment to load gene annotation from an intermediate file
+# gene_annotation = read.csv("Annotations_For_All_Measured_Genes.csv")
+
+# conversion from CPM to FPKM ---------------------------------------------------------------
+all(rownames(exon_lengths) == rownames(gx_data)) # TRUE (just a check)
+cpm2fpkm <- function(x) {
+  .t <- 2^(x) * 1E3 / exon_lengths[, 1]
+}
+gx_data_fpkm <- cpm2fpkm(gx_data)
+
+# determine noise threshold and which genes are below ---------------------------------------
+gx_data_bygender = gx_data_fpkm
+colnames(gx_data_bygender) = sample_info$gender
+
+y_genes = unique(gene_annotation[gene_annotation$chromosome_name == "Y",]$ensembl_gene_id)
+y_exp = gx_data_bygender[y_genes[is.element(y_genes, rownames(gx_data))],
+                         is.element(colnames(gx_data_bygender), "Female")]
+
+noise_threshold = mean(rowMeans(y_exp))
+noise_status = as.data.frame(rowMeans(gx_data_fpkm) < noise_threshold)
+colnames(noise_status) = c("noise")
+noise_status[noise_status == TRUE,] = "Below Threshold"
+noise_status[noise_status == FALSE,] = "Above Threshold"
+
+# add noise status to the results -----------------------------------------------------------
+deg_annotated = merge(deg_annotated, noise_status, 
+                      by.x = "ensembl_gene_id", 
+                      by.y = "row.names") 
+
+```
+
+**DATA EXPORT** 
+```{r}
+
+write.table(deg_annotated, file = "Annotated_Differential_Gene_Expression_Analysis.txt", 
+            sep = "\t", 
+            row.names = FALSE)
+
+# Open pdf file
+pdf(file = "Figures.pdf" )
+NF_boxplot
+DCM_boxplot
+HCM_boxplot
+PPCM_boxplot
+All_boxplot
+NF_density_plot
+DCM_density_plot
+PPCM_density_plot
+HCM_density_plot
+All_density_plot
+PCA_1v2_plot
+dev.off()
+
+# Uncomment to save figures as separate pngs ------------------------------------------------
+
+# ggsave("boxplot_NF_gene_expression.png",NF_boxplot,"png")
+# ggsave("boxplot_DCM_gene_expression.png", DCM_boxplot,"png")
+# ggsave("boxplot_HCM_gene_expression.png",HCM_boxplot,"png")
+# ggsave("boxplot_PPCM_gene_expression.png",PPCM_boxplot,"png")
+# ggsave("boxplot_all_samples_gene_expression.png",All_boxplot,"png")
+# ggsave("density_plot_NF_gene_expression.png",NF_density_plot,"png")
+# ggsave("density_plot_DCM_gene_expression.png",DCM_density_plot,"png")
+# ggsave("density_plot_PPCM_gene_expression.png",PPCM_density_plot,"png")
+# ggsave("density_plot_HCM_gene_expression.png",HCM_density_plot,"png")
+# ggsave("density_plot_all_samples_gene_expression.png",All_density_plot,"png")
+# ggsave("PCA_PC1_vs_PC2.png", PCA_1v2_plot,"png")
+```
