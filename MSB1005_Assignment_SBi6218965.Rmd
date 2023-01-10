@@ -128,6 +128,7 @@ All_exp = gather(gx_data,
                  key = 'Sample',
                  value = 'CPM')
 
+
 # Box plots --------------------------------------------------------------------------
 NF_boxplot = ggplot(NF_exp, aes(Sample,CPM)) +
   geom_boxplot() +
