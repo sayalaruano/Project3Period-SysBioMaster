@@ -1,0 +1,279 @@
+#Rodrigo Sánchez Núñez
+#R final assignment
+#Experimental Design and Data Management (2223-MSB1005)
+#Prof. Michiel Adriaens
+#The assignment
+# 1) Data import:
+#1a) Import the all data files
+setwd("/Users/rodrigosanchez/Documents/RASSIGMENT")
+GeneEx <- read.delim("MAGNET_GeneExpressionData_CPM_19112020.txt", as.is = T,
+                     row.names = 1)
+SampleData <- read.csv("MAGNET_SampleData_18112022.csv", as.is = T,
+                       row.names = 1)
+ExoneL<- read.delim("MAGNET_exonLengths.txt", as.is = T,
+                  row.names = 1)
+
+#1b) Export a publication-ready table of participant characteristics, including statistics comparing the four etiologies.
+Etiology_table <- prop.table(table(SampleData$etiology))
+xtabs(~etiology+gender+age, SampleData)
+Sd_etilogy < sd(SampleData$etiology)
+table(Sd_etiology)
+#2) Diagnostic plots:
+#2a) At least one data distribution figure (e.g. boxplots, density plots). 
+#This is the distribution according to cardiomyopathy and gender in a boxplot. 
+library(ggplot2)
+gender <- ggplot(SampleData, aes(x=etiology, fill=gender)) +
+  geom_boxplot(position="dodge") + 
+  labs(
+    title = "Patients with a cardiomyopathy",
+    tag = "Figure 1",
+    x = "Cardiomyopathy (etiology)",
+    y = "count",
+  )
+gender 
+#This is a density plot with the distribution of the cardiomyopathy.
+library(ggplot2)
+gender2 <- ggplot(SampleData, aes(x=etiology)) +
+  geom_density()+
+  labs(
+    title = "Patients with a cardiomyopathy",
+    tag = "Figure 2",
+    x = "Cardiomyopathy (etiology)", 
+    y = "Density",
+  )
+gender2
+
+#This plot is according the sample (patient) and the CPM (Boxplot)
+donorIndex <- which(SampleData$etiology == "NF")
+donorIds <- rownames(SampleData)[donorIndex]
+GeneEx_donors <- GeneEx[, donorIds]
+Data <- gather(GeneEx_donors, key = "SampleID", value = "CPM")
+ggplot(Data, aes(x = SampleID, y = CPM)) +
+  geom_boxplot() + theme_classic() +
+  labs(
+    title = "CPM average of each sample (Boxplot)",
+    tag = "Figure 3",
+  )
+
+#This plot is according the sample (patient) and the CPM (Violin)
+donorIndex <- which(SampleData$etiology == "NF")
+donorIds <- rownames(SampleData)[donorIndex]
+GeneEx_donors <- GeneEx[, donorIds]
+Data <- gather(GeneEx_donors, key = "SampleID", value = "CPM")
+ggplot(Data, aes(x = SampleID, y = CPM)) +
+  geom_violin() + theme_classic() +
+  labs(
+    title = "CPM avergae of each sample (Violin)",
+    tag = "Figure 4",
+  )
+
+#2b) At least one PCA figure showing the sample clustering colored by relevant 
+#co-variables.
+ggplot(Data, aes(x = CPM, color = SampleID)) +
+  geom_density(alpha = 0.1) +
+  theme(panel.background = element_blank()) +
+  labs(
+    title = "SampleID, the CPM and their density",
+    tag = "Figure 5",
+  )
+
+Pvalues <- apply(GeneEx, 2, function(x){
+  shapiro.test(sample(x, 5000))$p.value
+})
+table(Pvalues < 0.05)
+
+require(pcaMethods)
+PCAdata <- pca(t(GeneEx), nPcs = 10)
+plot(PCAdata)
+plotPcs(PCAdata, c(1,2)) 
+
+all(rownames(PCAdata@scores) == SampleData[,1])
+plotData <- cbind(data.frame(PCAdata@scores), SampleData)
+
+ggplot(plotData, aes(x = PC1, y = PC2)) + 
+  geom_point(aes(size = 0.1, col = etiology))
+ggplot(plotData, aes(x = PC1, y = PC2)) + 
+  geom_point(aes(size = weight, col = etiology))
+ggplot(plotData, aes(x = PC1, y = PC2)) + 
+  geom_point(aes(size = age, col = etiology))
+ggplot(plotData, aes(x = PC1, y = PC2)) + 
+  geom_point(aes(size = weight, col = height))
+ggplot(plotData, aes(x = PC1, y = PC2)) + 
+  geom_point(aes(size = age, col = gender))
+ggplot(plotData, aes(x = PC1, y = PC2)) + 
+  geom_point(aes(size = age, col = race))
+
+#2c) Plots are exported (e.g. as PNG or PDF) with clear file names. 
+# Package suggestion: pcaMethods, ggplot, gridextra, tidyr. 
+pdf("/Users/rodrigosanchez/Documents/RASSIGMENT")
+pdf(file= "Figures of data distribution.pdf")
+
+library(ggplot2)
+gender <- ggplot(SampleData, aes(x=etiology, fill=gender)) +
+  geom_boxplot(position="dodge") + 
+  labs(
+    title = "Patients with a cardiomyopathy",
+    tag = "Figure 1",
+    x = "Cardiomyopathy (etiology)",
+    y = "count",
+  )
+gender 
+
+library(ggplot2)
+gender2 <- ggplot(SampleData, aes(x=etiology)) +
+  geom_density()+
+  labs(
+    title = "Patients with a cardiomyopathy",
+    tag = "Figure 2",
+    x = "Cardiomyopathy (etiology)", 
+    y = "Density",
+  )
+gender2
+dev.off()
+
+pdf(file= "Figures CPM.pdf")
+
+donorIndex <- which(SampleData$etiology == "NF")
+donorIds <- rownames(SampleData)[donorIndex]
+GeneEx_donors <- GeneEx[, donorIds]
+Data <- gather(GeneEx_donors, key = "SampleID", value = "CPM")
+ggplot(Data, aes(x = SampleID, y = CPM)) +
+  geom_boxplot() + theme_classic() +
+  labs(
+    title = "CPM average of each sample (Boxplot)",
+    tag = "Figure 3",
+  )
+
+donorIndex <- which(SampleData$etiology == "NF")
+donorIds <- rownames(SampleData)[donorIndex]
+GeneEx_donors <- GeneEx[, donorIds]
+Data <- gather(GeneEx_donors, key = "SampleID", value = "CPM")
+ggplot(Data, aes(x = SampleID, y = CPM)) +
+  geom_violin() + theme_classic() +
+  labs(
+    title = "CPM avergae of each sample (Violin)",
+    tag = "Figure 4",
+  )
+
+ggplot(Data, aes(x = CPM, color = SampleID)) +
+  geom_density(alpha = 0.1) +
+  theme(panel.background = element_blank()) +
+  labs(
+    title = "SampleID, the CPM and their density",
+    tag = "Figure 5",
+  )
+dev.off()
+
+pdf(file= "PCA figures.pdf")
+
+require(pcaMethods)
+PCAdata <- pca(t(GeneEx), nPcs = 10)
+plot(PCAdata)
+plotPcs(PCAdata, c(1,2)) 
+
+ggplot(plotData, aes(x = PC1, y = PC2)) + 
+  geom_point(aes(size = 0.1, col = etiology))
+
+ggplot(plotData, aes(x = PC1, y = PC2)) + 
+  geom_point(aes(size = weight, col = etiology)) 
+
+ggplot(plotData, aes(x = PC1, y = PC2)) + 
+  geom_point(aes(size = age, col = etiology))
+
+ggplot(plotData, aes(x = PC1, y = PC2)) + 
+  geom_point(aes(size = weight, col = height))
+
+ggplot(plotData, aes(x = PC1, y = PC2)) + 
+  geom_point(aes(size = age, col = gender))
+
+ggplot(plotData, aes(x = PC1, y = PC2)) + 
+  geom_point(aes(size = age, col = race))
+
+dev.off()
+
+#3) Statistical analysis 
+#3a) Perform a differential gene expression analysis comparing DCM, HCM and
+#PCMM patients to the healthy donors.
+
+require(limma)
+MatrixDCM <- model.matrix(~ 0 + etiology + gender + age, data = SampleData)
+fit <- lmFit(GeneEx, MatrixDCM)
+DCMControlMatrix <- makeContrasts(DCMvsControl = etiologyDCM - etiologyNF, 
+                                  levels = MatrixDCM)
+fit <- contrasts.fit(fit, DCMControlMatrix)
+ebFit <- eBayes(fit, trend = TRUE)
+dgeRes <- topTable(ebFit, coef = 'DCMvsControl', number = nrow(GeneEx))
+
+require(limma)
+MatrixHCM <- model.matrix(~ 0 + etiology + gender + age, data = SampleData)
+fit <- lmFit(GeneEx, MatrixHCM)
+HCMControlMatrix <- makeContrasts(HCMvsControl = etiologyHCM - etiologyNF, 
+                                  levels = MatrixHCM)
+fit <- contrasts.fit(fit, HCMControlMatrix)
+ebFit <- eBayes(fit, trend = TRUE)
+dgeRes <- topTable(ebFit, coef = 'HCMvsControl', number = nrow(GeneEx))
+
+require(limma)
+MatrixPCMM <- model.matrix(~ 0 + etiology + gender + age, data = SampleData)
+fit <- lmFit(GeneEx, MatrixPCMM)
+PCMMControlMatrix <- makeContrasts(PPCMvsControl = etiologyPPCM - etiologyNF, 
+                                   levels = MatrixPCMM)
+fit <- contrasts.fit(fit, PCMMControlMatrix)
+ebFit <- eBayes(fit, trend = TRUE)
+dgeRes <- topTable(ebFit, coef = 'PPCMvsControl', number = nrow(GeneEx))
+
+
+#4) Additional gene annotation
+#4a) Retrieve gene symbols and gene names based on the provided Ensembl gene 
+#identifiers.
+library(biomaRt)
+library(org.Hs.eg.db)
+library(tidyverse)
+
+ensemblIDs <- read.delim("MAGNET_GeneExpressionData_CPM_19112020.txt",header = F) 
+listEnsembl()
+ensembl <- useEnsembl(biomart = "genes")
+datasets <- listDatasets(ensembl)
+
+ensembl.con <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+
+attr <- listAttributes(ensembl.con)
+filters <- listFilters(ensembl.con)
+
+names <- getBM(attributes = c('ensembl_gene_id', 'external_gene_name'),
+               filters = "ensembl_gene_id",
+               values = ensemblIDs$V1,
+               mart = ensembl.con)
+
+#4b) Merge this additional annotation with the gene expression data object. 
+Gene_EX_An <- cbind(ExoneL,names)
+
+#5) Relative expression levels
+#5a) Transform the data to FPKM values; use the function from the skills trainings.
+cpm2fpkm <- function(x) {
+  geneTotExonLengths_kb <- ExoneL[, 1] / 1E3
+  .t <- 2^(x) / geneTotExonLengths_kb
+}
+SampleData_fpkm <- cpm2fpkm(ExoneL)
+
+
+#5b) Assess for each gene in the dataset whether it is expressed above 
+#background (noise) level. 
+Fdata <- data[!is.na(GeneEx),]
+means <- apply(filtered_data, 2, mean)
+stds <- apply(filtered_data, 2, sd)
+Score_gene <- (Fdata) / stds
+threshold <- 1
+GenesExpressed <- names(which(abs(z_scores) > threshold))
+
+# 6)Export the results: 
+#6a) The exported file with results should be a tab-delimited text file. 
+# specify the file path and name where you want to save the text file
+FinalFile <- "/Users/rodrigosanchez/Documents/RASSIGMENT"
+writeLines(cpm2fpkm, GenesExpressed)
+write.csv(GeneEx, "Gene data")
+
+install.packages("knitr")
+library(knitr)
+knit("Assigment.R")
+knit("Assigment.R", output = "AssigmentR.Rmd")
