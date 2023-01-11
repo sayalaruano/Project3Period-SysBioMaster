@@ -1,0 +1,381 @@
+---
+title: "ExpDesign_Assignment_DiegoRodriguez"
+author: "Diego Rodriguez Esperante"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: default
+  html_document: default
+---
+# Load Libraries
+```{r Library Loading}
+rm(list=ls())
+require(tidyr)
+require(ggplot2)
+require(dplyr)
+require(matrixStats)
+require(limma)
+require(rstudioapi)
+require(biomaRt)
+require(ggtree)
+require(pcaMethods)
+require(pheatmap)
+require(caroline)
+```
+
+# Data Import
+```{r Data Import, warning=FALSE}
+# # 1.a: 
+# # Import the all the data files.
+# This part is simple since we've done it many times before in previous skill 
+# sessions. To improve portability the path is extracted using rstudioapi so 
+# that you can move around the folder to any directory within your computer. We 
+# will load all the data files here so we don't mind that the path is not saved 
+# for further chunks.
+
+# Set paths and load files
+setwd(paste0(dirname(rstudioapi::getSourceEditorContext()$path), "/Data"))
+sampleInfo <- read.csv("MAGNET_SampleData_18112022.csv",row.names = 1, stringsAsFactors = FALSE) # HINT, set the argument "row.names = 1"
+gxData <- read.delim("MAGNET_GeneExpressionData_CPM_19112020.txt", row.names = 1)
+geneTotExonLengths <- read.delim("MAGNET_exonLengths.txt", as.is = T, row.names = 1)
+```
+
+# Data inspection
+```{r Demographic analysis}
+# # 1.b:
+# # Export a publication ready table of participant characteristics, 
+# # including statistics comparing the four etiologies.
+# Here is a basic plot of six demographics, all in one figure to save space.
+
+# Inspecting this data we see that it's more or less distributed as one would 
+# expect, except for the BMI where, upon closer inspection, some values throw 
+# off the data (like 75 and 98 cm people with 175 and 198 cm weight). We expect 
+# this to be a typo that we won't go through the effort of correcting unless 
+# deemed necessary.
+
+# Initial plotting
+etiology_plot = ggplot(sampleInfo, aes(etiology)) +
+  geom_bar(aes(fill = etiology)) +
+  theme(legend.position="none") +
+  ylab("Population")  + xlab("Condition")
+
+gender_summary = data.frame(c("Male", "Female"), c(sum(sampleInfo$gender == "Male", na.rm = TRUE), sum(sampleInfo$gender == "Female", na.rm = TRUE)))
+colnames(gender_summary) = c("Levels", "Count")
+
+gender_plot = ggplot(gender_summary, aes(x = Levels, y=Count, fill=Levels)) +
+  geom_bar(stat = 'identity') +
+  ylab("Population") + xlab("Gender") + theme(legend.position="none") +
+  geom_text(aes(label = Count), vjust = 1.5)
+
+race_summary = data.frame(c("AA", "Caucasian"), c(sum(sampleInfo$race == "AA", na.rm = TRUE), sum(sampleInfo$race == "Caucasian", na.rm = TRUE)))
+colnames(race_summary) = c("Levels", "Count")
+
+race_plot = ggplot(race_summary, aes(x = Levels, y = Count, fill=Levels)) +
+  geom_bar(stat = 'identity') +
+  ylab("Population") + xlab("Race") + theme(legend.position="none") +
+  geom_text(aes(label = Count), vjust = 1.5)
+
+diabetes_summary = data.frame(c("Yes", "No"), c(sum(sampleInfo$Hypertension == "Yes", na.rm = TRUE), sum(sampleInfo$Hypertension == "No", na.rm = TRUE)))
+colnames(diabetes_summary) = c("Levels", "Count")
+
+diabetes_plot = ggplot(diabetes_summary, aes(x = Levels, y = Count, fill=Levels)) +
+  geom_bar(stat = 'identity') +
+  ylab("Population") + xlab("Diabetes") + theme(legend.position="none") +
+  geom_text(aes(label = Count), vjust = 1.5)
+
+hypertension_summary = data.frame(c("Yes", "No"), c(sum(sampleInfo$Hypertension == "Yes", na.rm = TRUE), sum(sampleInfo$Hypertension == "No", na.rm = TRUE)))
+colnames(hypertension_summary) = c("Levels", "Count")
+
+hypertension_plot = ggplot(hypertension_summary, aes(x = Levels, y = Count, fill=Levels)) +
+  geom_bar(stat = 'identity') +
+  ylab("Population") + xlab("Hypertension") + theme(legend.position="none") +
+  geom_text(aes(label = Count), vjust = 1.5)
+
+bmi_summary = data.frame(sampleInfo$weight/((sampleInfo$height/100)^2))
+colnames(bmi_summary) = "BMI"
+
+BMI_plot = ggplot(bmi_summary, aes(BMI)) +
+  geom_density() +
+  ylab("Density") + xlab("BMI")
+
+etiologies_summary = data.frame(c("NF", "DCM", "HCM", "PPCM"), c(sum(sampleInfo$etiology == "NF", na.rm = TRUE), sum(sampleInfo$etiology == "DCM", na.rm = TRUE), sum(sampleInfo$etiology == "HCM", na.rm = TRUE), sum(sampleInfo$etiology == "PPCM", na.rm = TRUE)))
+colnames(etiologies_summary) = c("Levels", "Count")
+
+etiologies_plot = ggplot(etiologies_summary, aes(x = Levels, y = Count, fill=Levels)) +
+  geom_bar(stat = 'identity') +
+  ylab("Population") + xlab("Etiology") + theme(legend.position="none") +
+  geom_text(aes(label = Count), vjust = c(1.5, 1.5, -0.2, -0.2))
+
+multiplot(gender_plot, race_plot, diabetes_plot, hypertension_plot, BMI_plot, etiologies_plot, ncol=2)
+
+rm("gender_summary", "race_summary", "diabetes_summary", "hypertension_summary", "bmi_summary", "etiologies_summary")
+```
+
+# Diagnostic plots
+Diagnostic boxplots gathering expression data from each sample.
+```{r Diagnostic box plots}
+# # 2.a:
+# # At least one data distribution figure (e.g. boxplots, density plots).
+etiologies = c("NF", "DCM", "HCM", "PPCM")
+
+gathering_from_source = function(x){
+  etiology_patients = rownames(sampleInfo[sampleInfo$etiology==x,])
+  etiology_expression = gather(gxData[,etiology_patients], key = "Sample", value = "CPM")
+  return(etiology_expression)
+}
+
+separated_expression = lapply(etiologies, gathering_from_source)
+names(separated_expression) = etiologies
+
+DCM_plot_box = ggplot(separated_expression$DCM, aes(Sample, CPM)) +
+  geom_boxplot() +
+  ylab("Avg expression") + xlab("Patients") + ggtitle("Gene expression in DCM patients") + theme(axis.ticks = element_blank(), axis.text.x = element_blank())
+
+HCM_plot_box = ggplot(separated_expression$HCM, aes(Sample, CPM)) +
+  geom_boxplot() +
+  ylab("Avg expression") + xlab("Patients") + ggtitle("Gene expression in HCM patients") + theme(axis.ticks = element_blank(), axis.text.x = element_blank())
+
+NF_plot_box = ggplot(separated_expression$NF, aes(Sample, CPM)) +
+  geom_boxplot() +
+  ylab("Avg expression") + xlab("Patients") + ggtitle("Gene expression in healthy patients") + theme(axis.ticks = element_blank(), axis.text.x = element_blank())
+
+PPCM_plot_box = ggplot(separated_expression$PPCM, aes(Sample, CPM)) +
+  geom_boxplot() +
+  ylab("Avg expression") + xlab("Patients") + ggtitle("Gene expression in PPCM patients") + theme(axis.ticks = element_blank(), axis.text.x = element_blank())
+
+multiplot(NF_plot_box, DCM_plot_box, HCM_plot_box, PPCM_plot_box, ncol=2)
+```
+
+PCA Diagnostic
+```{r PCA Diagnostic}
+# # 2.b:
+# # At least one PCA figure showing the sample clustering colored by relevant 
+# # covariates.
+pca_test = pca(t(gxData))
+
+PCs = data.frame(pca_test@scores[,1],
+                 pca_test@scores[,2])
+colnames(PCs) = c("PC1", "PC2")
+sampleInfoPCs = sampleInfo
+sampleInfoPCs$PC1 = PCs$PC1
+sampleInfoPCs$PC2 = PCs$PC2
+
+PCA_plot = ggplot(sampleInfoPCs, aes(PC1, PC2, color = etiology)) +
+  geom_point() + labs(title = "Principal Component Analysis")
+
+PCA_plot
+```
+
+# Statistical Analysis
+First we'll see if including covariates throws out different results. We create both design matrices.
+```{r Create design matrix for DGEA}
+# # 3.a:
+# # Perform a differential gene expression analysis comparing DCM, HCM and PPCM
+# # patients to the healthy donors.
+# For comparison's sake we'll start DGEA without accounting for any covariates, 
+# considering only etiology in our analysis. Since DCM and NF groups are the
+# ones with the highest sample size we'll use them to compare how covariates
+# affect it.
+
+# Creating the design matrix
+design_matrix_base = model.matrix(~0 + etiology, data = sampleInfo)
+cont.matrix_base = makeContrasts(DCMvControl = etiologyDCM - etiologyNF,
+                                 HCMvControl = etiologyHCM - etiologyNF,
+                                 PPCMvControl = etiologyPPCM - etiologyNF,
+                                 HFvControl = (etiologyDCM + etiologyHCM + etiologyPPCM) - etiologyNF,
+                                 levels = design_matrix_base)
+
+# Creating the linear regression
+fit_base = lmFit(gxData, design_matrix_base)
+fit_base = contrasts.fit(fit_base, cont.matrix_base)
+fit_base = eBayes(fit_base, trend=TRUE)
+
+# The same as the previous procedure, now including covariates
+design_matrix_covariates = model.matrix(~0 + etiology + age + gender, data = sampleInfo)
+cont.matrix_covariates = makeContrasts(DCMvControl = etiologyDCM - etiologyNF,
+                                       HCMvControl = etiologyHCM - etiologyNF,
+                                       PPCMvControl = etiologyPPCM - etiologyNF,
+                                       HFvControl = (etiologyDCM + etiologyHCM + etiologyPPCM) - etiologyNF,
+                                       levels = design_matrix_covariates)
+
+fit_covariates = lmFit(gxData, design_matrix_covariates)
+fit_covariates = contrasts.fit(fit_covariates, cont.matrix_covariates)
+fit_covariates = eBayes(fit_covariates, trend=TRUE)
+```
+
+Evaluate and plot the difference between accounting and not accounting for covariates
+```{r Testing accounting for covariates}
+fit_base_table_DCM = topTable(fit_base, coef = "DCMvControl",
+                              p.value = 0.05, sort.by = "logFC")
+fit_covariates_table_DCM = topTable(fit_covariates, coef = "DCMvControl",
+                                    p.value = 0.05, sort.by = "logFC")
+
+top_10_genes_CovBase = unique(c(rownames(fit_base_table_DCM), rownames(fit_covariates_table_DCM)))
+
+comparison_table = data.frame(
+  cbind(c(topTable(fit_base,coef = "DCMvControl", n = Inf, p.value = 0.05, sort.by = "logFC")[top_10_genes_CovBase,]$logFC, 
+          topTable(fit_covariates, coef = "DCMvControl", n = Inf, p.value = 0.05, sort.by = "logFC")[top_10_genes_CovBase,]$logFC), 
+        rep(top_10_genes_CovBase, 2), 
+        c(rep("Base", length(top_10_genes_CovBase)), rep("Covariates", length(top_10_genes_CovBase)))))
+
+colnames(comparison_table) = c("FC", "Gene", "CovariateOrBase")
+comparison_table$FC = as.numeric(comparison_table$FC)
+
+comparison_table_plot = ggplot(comparison_table, aes(x = FC, y = Gene, fill = CovariateOrBase))+
+  geom_col(position = "dodge") + 
+  labs(title = "Most differentially expressed genes", subtitle = "NF vs DCM") + 
+  xlab("logFC expression") + 
+  guides(fill=guide_legend(title="Accounting for \ncovariates")) +
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle = element_text(hjust = 0.5))
+
+comparison_table_plot
+```
+
+It doesn't make much of a difference for the top most genes, but we should take into account the covariates just in case. Let's plot the 50 most differentially expressed genes in all etiology comparisons to see if there are different patterns between them.
+```{r DGEA}
+top_50_genes = unique(c(rownames(topTable(fit_covariates, coef = "DCMvControl", n = 50, p.value = 0.05, sort.by = "logFC")),
+                        rownames(topTable(fit_covariates, coef = "HCMvControl", n = 50, p.value = 0.05, sort.by = "logFC")),
+                        rownames(topTable(fit_covariates, coef = "PPCMvControl", n = 50, p.value = 0.05, sort.by = "logFC"))
+                        ))
+
+fit_covariates_table_DCM = topTable(fit_covariates, coef = "DCMvControl", n = Inf,  p.value = 0.05, sort.by = "logFC")
+fit_covariates_table_HCM = topTable(fit_covariates, coef = "HCMvControl", n = Inf, p.value = 0.05, sort.by = "logFC")
+fit_covariates_table_PPCM = topTable(fit_covariates, coef = "PPCMvControl", n = Inf, p.value = 0.05, sort.by = "logFC")
+fit_covariates_table_HF = topTable(fit_covariates, coef = "HFvControl", n = Inf, p.value = 0.05, sort.by = "logFC")
+
+fit_top50_all = data.frame(Gene_Names = top_50_genes,
+                      DCM = fit_covariates_table_DCM[top_50_genes,]$logFC,
+                      HCM = fit_covariates_table_HCM[top_50_genes,]$logFC,
+                      PPCM = fit_covariates_table_PPCM[top_50_genes,]$logFC,
+                      HF = fit_covariates_table_HF[top_50_genes,]$logFC)
+rownames(fit_top50_all) = top_50_genes
+
+DGEA_heatmap = pheatmap(fit_top50_all[,2:5], cluster_cols = FALSE, show_rownames = FALSE, main = "Heatmap of the top 50 most differentially expressed genes across etiologies")
+
+DGEA_heatmap
+
+# rm("cont.matrix_base", "cont.matrix_covariates", "design_matrix_base", "design_matrix_covariates")
+```
+
+There are plenty of genes with high absolute FC, and most are consistent across etiologies.
+
+# Gene annotation
+```{r Extract gene annotation data with Ensembl}
+# # 4.a:
+# # Retrieve gene symbols and gene names based on the provided Ensembl gene
+# # identifiers.
+
+# Connect to the database
+mart = useEnsembl(biomart = "genes", dataset = "hsapiens_gene_ensembl")
+
+# Get information
+genes_annotated = getBM(attributes = c('ensembl_gene_id','external_gene_name', 'hgnc_symbol', 'chromosome_name', 'description','name_1006'),
+                        values = rownames(gxData),
+                        mart = mart)
+```
+
+We need to manipulate them further in order to be able to append it to the original gxData.
+```{r Annotation manipulation}
+# Remove duplicates
+genes_annotated = genes_annotated[!duplicated(genes_annotated$ensembl_gene_id),]
+# Change names of rows for ease of manipulation
+rownames(genes_annotated) = genes_annotated$ensembl_gene_id
+# Exclude those not in our gxData
+genes_annotated = genes_annotated[rownames(genes_annotated) %in% rownames(gxData),]
+# Find the genes in the gxData that were not retreived from Ensembl 
+missing_genes = rownames(gxData)[!(rownames(gxData) %in% rownames(genes_annotated))]
+missing_genes_annotated = cbind(missing_genes, as.data.frame(matrix(ncol = (ncol(genes_annotated)-1), nrow = length(missing_genes))))
+colnames(missing_genes_annotated) = colnames(genes_annotated)
+rownames(missing_genes_annotated) = missing_genes
+# Final gene annotation
+genes_annotated = rbind(genes_annotated,missing_genes_annotated)
+genes_annotated = genes_annotated[order(genes_annotated$ensembl_gene_id),]
+# # 4.b:
+# # Merge this additional annotation with the gene expression data object.
+# Create new appended data frame
+gxData_appended = cbind(gxData, genes_annotated)
+
+rm("mart", "missing_genes")
+```
+
+# Average expression data
+The data needs to be transfortmed to fpkm values for it to be workable across genes.
+```{r Transform to fpkm values}
+# # 5.a:
+# # Transform the data to FPKM values; use the function from the skills
+# # trainings.
+cpm2fpkm <- function(x) {
+  .t <- 2^(x) * 1E3 / geneTotExonLengths[, 1]
+}
+gxData_fpkm <- cpm2fpkm(gxData)
+```
+
+To account for noise a good strategy is to take the average of values we expect to be zero and use that as a threshold. It was suggested we use the values of y chromosomes of female patients, so that's what we'll use.
+```{r Noise}
+# # 5.b:
+# # Assess for each gene in the dataset whether it is expressed above background
+# # (noise) level.
+
+# # 5.c:
+# # For example: you can base this on comparing the average expression of a
+# # gene to the average expression of Y chromosome genes in female subjects.
+
+# Noise, as suggested, taken to be the values of y-chromosome genes in
+# females, since most of them don't have a Y chromosome we would expect this
+# value to be zero
+female_samples = sampleInfo$gender %in% "Female"
+y_genes = genes_annotated$chromosome_name %in% "Y"
+
+noise = mean(rowMeans(gxData[y_genes, female_samples]))
+
+# Now let's take the average of the expression for all values
+
+avg_gxData = data.frame(mean_expression = rowMeans(gxData))
+avg_above_noise = avg_gxData > noise
+
+# Combine all gene info into one file, all DGEA, average expression, and wether or not there is noise
+
+gene_analysis = data.frame(Gene_Names = rownames(gxData),
+                           DGEA_DCM_logFC = topTable(fit_covariates, coef = "DCMvControl", n = Inf)[rownames(gxData),]$logFC,
+                           DGEA_HCM_logFC = topTable(fit_covariates, coef = "HCMvControl", n = Inf)[rownames(gxData),]$logFC,
+                           DGEA_PPCM_logFC = topTable(fit_covariates, coef = "PPCMvControl", n = Inf)[rownames(gxData),]$logFC,
+                           DGEA_NF_logFC = topTable(fit_covariates, coef = "HFvControl", n = Inf)[rownames(gxData),]$logFC,
+                           average_expression = avg_gxData,
+                           above_noise = avg_above_noise)
+
+gene_analysis = cbind(gene_analysis, genes_annotated)
+rm("female_samples", "y_genes", "noise")
+```
+
+# Export the results
+Export plots
+```{r Export the plots, eval=FALSE, include=FALSE}
+# Save plots
+setwd(paste0(dirname(rstudioapi::getSourceEditorContext()$path), "/OutputFiles/Plots"))
+# Data exploration plots
+ggsave("Gender_demographics.png", gender_plot)
+ggsave("Race_demographics.png", race_plot)
+ggsave("Diabetes_demographics.png", diabetes_plot)
+ggsave("Hypertension_demographics.png", hypertension_plot)
+ggsave("BMI_demographics.png", BMI_plot)
+ggsave("Etiologies_demographics.png", etiologies_plot)
+# Diagnostic plots
+ggsave("PCA.png", PCA_plot)
+ggsave("NF_expression_levels_boxplot.png", NF_plot_box)
+ggsave("DCM_expression_levels_boxplot.png", DCM_plot_box)
+ggsave("HCM_expression_levels_boxplot.png", HCM_plot_box)
+ggsave("PPCM_expression_levels_boxplot.png", PPCM_plot_box)
+# Statistical plots
+ggsave("DGEA_heatmap.png", DGEA_heatmap)
+ggsave("Accounting_and_not_for_covariates.png", comparison_table_plot)
+
+```
+
+Export data as tab delimited text files
+```{r Export as tab delimited files, eval=FALSE, include=FALSE}
+# Tab delimited output files
+setwd(paste0(dirname(rstudioapi::getSourceEditorContext()$path), "/OutputFiles"))
+write.delim(fit_top50_all, "Top_50_Genes_DGEA_logFC.txt", row.names = T)
+write.delim(gene_analysis, "gene_analysis_summary.txt", row.names = T)
+```
+
