@@ -4,6 +4,7 @@ require(clusterProfiler)
 require(Biobase)
 require(GEOquery)
 require(org.Hs.eg.db)
+require(caroline)
 
 setwd(paste0(dirname(
   rstudioapi::getSourceEditorContext()$path
@@ -44,6 +45,7 @@ geneID_gxData = bitr(
 colnames(geneID_gxData) = c("ENSEMBL_ID", "ENTREZ_ID")
 # Remove duplicates
 geneID_gxData = geneID_gxData[!duplicated(geneID_gxData$ENTREZ_ID),]
+geneID_gxData = geneID_gxData[!duplicated(geneID_gxData$ENSEMBL_ID),]
 
 #### ROSETTA ID CREATION #######################################################
 create_Rosetta = function(dataset,
@@ -102,4 +104,29 @@ translate_dataset = function(dataset_name) {
   rosetta = create_Rosetta(dataset)
   
   expData = extract_expData(dataset, rosetta)
+  expData = data.frame(GENE_NAME = rownames(expData), expData)
+  
+  setwd(paste0(
+    dirname(rstudioapi::getSourceEditorContext()$path),
+    "/Translated_DataSets"
+  ))
+  write.delim(expData, paste0("expData_", dataset_name, ".txt"), row.names = F)
+}
+
+#### FIT TO ONLY gxData GENES ##################################################
+fit_to_gxData = function(expression_data){
+  gxData_genelist = rownames(gxData)
+  
+  expData_genelist = rownames(expression_data)
+  
+  common_genes = intersect(gxData_genelist, expData_genelist)
+  missing_genes = setdiff(gxData_genelist, expData_genelist)
+  missing_expression = as.data.frame(matrix(
+    nrow = length(missing_genes),
+    ncol = ncol(expression_data),
+    dimnames = list(missing_genes, colnames(expression_data))
+  ))
+  
+  fit_expression_data = rbind(expression_data[common_genes,], missing_expression)
+  fit_expression_data = fit_expression_data[rownames(gxData),]
 }
