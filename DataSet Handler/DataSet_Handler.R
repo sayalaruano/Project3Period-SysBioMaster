@@ -20,7 +20,7 @@ extract_dataset = function(dataset_name) {
     "/DataSets"
   ))
   # Extract dataset
-  dataset <- getGEO(dataset_name, destdir = ".")
+  dataset <- read.delim(dataset_name)
   
   # Transform to the same class
   if (class(dataset) == "list") {
@@ -31,102 +31,95 @@ extract_dataset = function(dataset_name) {
   return(dataset)
 }
 
-#gse1869 = extract_dataset("GSE1869")
-#gds4772 = extract_dataset("GDS4772")
-#gse5406 = extract_dataset("GSE5406")
-
-# Extract Entrez ID for translation between our gx data and the datasets
-geneID_gxData = bitr(
-  rownames(gxData),
-  fromType = "ENSEMBL",
-  toType = "ENTREZID",
-  OrgDb = org.Hs.eg.db
-)
-colnames(geneID_gxData) = c("ENSEMBL_ID", "ENTREZ_ID")
-# Remove duplicates
-geneID_gxData = geneID_gxData[!duplicated(geneID_gxData$ENTREZ_ID),]
-geneID_gxData = geneID_gxData[!duplicated(geneID_gxData$ENSEMBL_ID),]
-
 #### ROSETTA ID CREATION #######################################################
 create_Rosetta = function(dataset,
-                          DATASETID_colname = "ID",
-                          ENTREZID_colname = "ENTREZ_GENE_ID") {
-  # Create Data frame with the Entrez ID of our datasets
-  geneID_dataset = data.frame(DATASET_ID = as.character(fData(dataset)[, DATASETID_colname]),
-                              ENTREZ_ID = as.character(fData(dataset)[, ENTREZID_colname]))
-  # Remove duplicates
-  geneID_dataset = geneID_dataset[!duplicated(geneID_dataset$ENTREZ_ID),]
+                          dataset_ID_type,
+                          genes.in.rows = FALSE) {
+  # Extract Entrez ID for translation between our gx data and the datasets
+  geneID_gxData = bitr(
+    rownames(gxData),
+    fromType = "ENSEMBL",
+    toType = dataset_ID_type,
+    OrgDb = org.Hs.eg.db
+  )
   
-  rownames(geneID_gxData) = geneID_gxData$ENTREZ_ID
-  rownames(geneID_dataset) = geneID_dataset$ENTREZ_ID
+  # Remove duplicates
+  geneID_gxData = geneID_gxData[!duplicated(geneID_gxData[, 1]), ]
+  geneID_gxData = geneID_gxData[!duplicated(geneID_gxData[, 2]), ]
+  # Standardize colnames
+  colnames(geneID_gxData) = c("ENSEMBL_ID", paste0(dataset_ID_type, "_ID"))
+  rownames(geneID_gxData) = geneID_gxData[, 2]
+  
+  # Create data frame with the ID of our datasets
+  if (genes.in.rows) {
+    geneID_dataset = rownames(dataset)
+  } else{
+    geneID_dataset = dataset[, 1]
+  }
+  # Remove duplicates
+  geneID_dataset = data.frame(geneID_dataset[!duplicated(geneID_dataset)])
+  rownames(geneID_dataset) = geneID_dataset[, 1]
+  colnames(geneID_dataset) = paste0(dataset_ID_type, "_ID")
   
   # Select genes in both datasets
-  common_genes = intersect(rownames(geneID_gxData), rownames(geneID_dataset))
-  geneID_gxData = geneID_gxData[common_genes,]
-  geneID_dataset = geneID_dataset[common_genes,]
-  
+  common_genes = intersect(geneID_dataset[, 1], geneID_gxData[, 2])
   
   # Create a new object with all the common genes and their three IDs
-  geneID_Rosetta = merge(geneID_gxData, geneID_dataset, by = "ENTREZ_ID")
+  geneID_Rosetta = geneID_gxData[common_genes, ]
 }
 
-#rosetta4772 = create_Rosetta(gds4772, "ID", "Gene ID")
-#rosetta1869 = create_Rosetta(gse1869, "ID", "ENTREZ_GENE_ID")
-#rosetta5406 = create_Rosetta(gse5406, "ID", "ENTREZ_GENE_ID")
-
-#### EXPRESSION DATA EXTRACTION ################################################
-extract_expData = function(dataset, rosetta) {
-  # Extract and translate to Ensembl the genes the dataset
-  expression_data = assayData(dataset)$exprs[rosetta$DATASET_ID,]
-  rownames(expression_data) = rosetta$ENSEMBL_ID
+#### FIT TO ONLY gxData GENES ##################################################
+fit_to_gxData = function(dataset, rosetta, genes.in.rows = FALSE) {
+  # Get the list of genes
+  gxData_genelist = rosetta[, 2]
+  if (genes.in.rows) {
+    expData_genelist = rownames(dataset)
+  } else{
+    expData_genelist = dataset[, 1]
+  }
   
-  # Add the genes not in the dataset
-  missing_genes = setdiff(rownames(gxData), rownames(expression_data))
+  # Get the genes that appear in gxData and the dataset
+  common_genes = intersect(gxData_genelist, expData_genelist)
+  # Get the genes that appear in gxData but not in the dataset
+  missing_genes = setdiff(gxData_genelist, expData_genelist)
+  # Create an empty dataframe with the missing genes
   missing_expression = as.data.frame(matrix(
     nrow = length(missing_genes),
-    ncol = ncol(expression_data),
-    dimnames = list(missing_genes, colnames(expression_data))
+    ncol = ncol(dataset),
+    dimnames = list(missing_genes, colnames(dataset))
   ))
   
-  # Putting it together and sorting according to MAGNet gene order
-  expression_data = rbind(expression_data, missing_expression)
-  expression_data = expression_data[rownames(gxData),]
+  # Combine the genes in common with the genes missing
+  if (genes.in.rows) {
+    fit_dataset = rbind(dataset[common_genes, ], missing_expression)
+    gene_list = data.frame(Gene = rownames(fit_dataset), row.names = rownames(fit_dataset))
+    fit_dataset = cbind(gene_list, fit_dataset)
+  } else{
+    rownames(dataset) = dataset[, 1]
+    fit_dataset = rbind(dataset[common_genes, ], missing_expression)
+  }
+  
+  # Order them according to the genes in gxData
+  fit_dataset = fit_dataset[rownames(gxData), ]
 }
 
-#expData4772 = extract_expData(gds4772, rosetta4772)
-#expData1869 = extract_expData(gse1869, rosetta1869)
-#expData5406 = extract_expData(gse5406, rosetta5406)
-
 #### PUTTING IT ALL TOGETHER ###################################################
-translate_dataset = function(dataset_name) {
+translate_dataset = function(dataset_name,
+                             dataset_ID_type,
+                             genes.in.rows = FALSE) {
   dataset = extract_dataset(dataset_name)
   
-  rosetta = create_Rosetta(dataset)
+  rosetta = create_Rosetta(dataset, dataset_ID_type, genes.in.rows)
   
-  expData = extract_expData(dataset, rosetta)
-  expData = data.frame(GENE_NAME = rownames(expData), expData)
+  fit_dataset = fit_to_gxData(dataset, rosetta, genes.in.rows)
   
   setwd(paste0(
     dirname(rstudioapi::getSourceEditorContext()$path),
     "/Translated_DataSets"
   ))
-  write.delim(expData, paste0("expData_", dataset_name, ".txt"), row.names = F)
-}
-
-#### FIT TO ONLY gxData GENES ##################################################
-fit_to_gxData = function(expression_data){
-  gxData_genelist = rownames(gxData)
+  write.delim(fit_dataset,
+              paste0("expData_",".txt"),
+              row.names = F)
   
-  expData_genelist = rownames(expression_data)
-  
-  common_genes = intersect(gxData_genelist, expData_genelist)
-  missing_genes = setdiff(gxData_genelist, expData_genelist)
-  missing_expression = as.data.frame(matrix(
-    nrow = length(missing_genes),
-    ncol = ncol(expression_data),
-    dimnames = list(missing_genes, colnames(expression_data))
-  ))
-  
-  fit_expression_data = rbind(expression_data[common_genes,], missing_expression)
-  fit_expression_data = fit_expression_data[rownames(gxData),]
+  return(fit_dataset)
 }
