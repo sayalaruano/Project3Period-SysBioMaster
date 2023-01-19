@@ -1,0 +1,143 @@
+---
+title: "GSE55296 Data Processing"
+output: html_document
+---
+
+## Libraries
+
+```{r}
+require(ggplot2)
+require(limma)
+require(tidyr)
+require(pcaMethods)
+require(rstudioapi)
+require(biomaRt)
+require(gridExtra)
+require(dplyr)
+require(DGEobj.utils)
+require(edgeR)
+```
+
+## Load Data
+
+```{r}
+setwd(dirname(getActiveDocumentContext()$path)) 
+
+exon_lengths_MAGNet <- read.delim("MAGNET_exonLengths.txt", as.is = T, row.names = 1)
+
+## GEO data (with metadata from SRA Selector)
+gx_data_all <- read.delim("GSE55296_count_data.txt.gz", as.is = T)
+gx_data <- gx_data_all[1:38]
+rownames(gx_data) <- gx_data$X 
+gx_data <- subset(gx_data, select = -c(X, X.1))
+
+metadata_all <- read.delim("GSE55296_metadata.txt", sep = ",", as.is = T)
+metadata <- subset(metadata_all, select = c(disease_state))
+metadata$disease_state[metadata$disease_state == "healthy"] = "NF"
+metadata$disease_state[metadata$disease_state == "dilated"] = "DCM"
+metadata$disease_state[metadata$disease_state == "ischemic"] = "ICM"
+
+colnames(gx_data) = metadata$disease_state
+gx_data <- gx_data[,!grepl("ICM", colnames(gx_data))]
+
+```
+
+## Normalization
+```{r}
+gx_num = as.matrix(gx_data, rownames.force = F)
+gx_num = as.numeric(gx_num)
+gx_num = matrix(as.numeric(gx_num), ncol = ncol(gx_data))
+gx_num[is.na(gx_num)] = 0
+
+gx_cpm_num <- convertCounts(gx_num, unit = "CPM",
+                            log = T,
+                            normalize = "tmm",
+                            prior.count = 0.25)
+#says it works with dataframes with numeric columns, but it does not
+gx_cpm = data.frame(gx_cpm_num)
+rownames(gx_cpm) = rownames(gx_data)
+colnames(gx_cpm) = colnames(gx_data)
+
+all_exp = gather(gx_cpm,
+                 key = 'Sample',
+                 value = 'CPM')
+
+all_boxplot = ggplot(all_exp, aes(Sample,CPM)) +
+  geom_boxplot() +
+  ggtitle("Gene Expression Box Plot in All Samples")
+
+all_density_plot = ggplot(all_exp, aes(CPM, color = Sample)) +
+  geom_density(alpha = 0.1) +
+  theme(legend.position = 'none') +
+  ylab("Density") +
+  ggtitle("Gene Expression Density in All Samples")
+
+all_boxplot
+all_density_plot
+```
+Principal Component Analysis
+``` {r}
+pca_gx = pca(t(gx_cpm), nPcs=3)
+
+plotPcs(pca_gx, type = "scores") 
+
+cnames = colnames(gx_cpm)
+cnames[grep("NF",cnames)] = "NF"
+cnames[grep("DCM",cnames)] = "DCM"
+
+pca_meta = data.frame(etiology = cnames, PC1 = pca_gx@scores[,1], PC2 = pca_gx@scores[,2], PC3 = pca_gx@scores[,3])
+
+PCA_1v2 = ggplot(pca_meta, aes(PC1, PC2,color = etiology)) +
+  geom_point(alpha = 0.6) +
+  geom_text(
+    label=rownames(pca_meta), 
+    nudge_y = 5, 
+    check_overlap = T,
+    alpha = 0.5,
+    color = "black"
+  ) +
+  xlab(paste("PC1 (",pca_gx@R2[1]*100,"%)")) +
+  ylab(paste("PC2 (",pca_gx@R2[2]*100,"%)")) +
+  ggtitle("Principal Component Analysis of Data - PC1 vs. PC2")
+
+
+PCA_1v3 = ggplot(pca_meta, aes(PC1, PC3,color = etiology)) +
+  geom_point(alpha = 0.6) +
+  geom_text(
+    label=rownames(pca_meta), 
+    nudge_y = 5, 
+    check_overlap = T,
+    alpha = 0.5,
+    color = "black"
+  ) +
+  xlab(paste("PC1 (",pca_gx@R2[1]*100,"%)")) +
+  ylab(paste("PC3 (",pca_gx@R2[3]*100,"%)")) +
+  ggtitle("Principal Component Analysis of Data - PC1 vs. PC3")
+
+PCA_3v2 = ggplot(pca_meta, aes(PC3, PC2,color = etiology)) +
+  geom_point(alpha = 0.6) +
+  geom_text(
+    label=rownames(pca_meta), 
+    nudge_y = 5, 
+    check_overlap = T,
+    alpha = 0.5,
+    color = "black"
+  ) +
+  xlab(paste("PC3 (",pca_gx@R2[3]*100,"%)")) +
+  ylab(paste("PC2 (",pca_gx@R2[2]*100,"%)")) +
+  ggtitle("Principal Component Analysis of Data - PC3 vs. PC2")
+
+PCA_1v2
+PCA_1v3
+PCA_3v2
+```
+
+## Export
+
+```{r}
+colnames(gx_cpm) = cnames
+gx_cpm[gx_cpm < -5] = NA
+write.table(gx_cpm, file = "GSE55296_CPM.txt", sep = "\t", row.names = T)
+```
+
+
