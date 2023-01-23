@@ -21,21 +21,13 @@ extract_dataset = function(dataset_name) {
   ))
   # Extract dataset
   dataset <- read.delim(dataset_name)
-  
-  # Transform to the same class
-  if (class(dataset) == "list") {
-    dataset = dataset[[1]]
-  } else if (class(dataset) == "GDS") {
-    dataset <- GDS2eSet(dataset)
-  }
   return(dataset)
 }
 
 #### ROSETTA ID CREATION #######################################################
-create_Rosetta = function(dataset,
-                          dataset_ID_type,
-                          genes.in.rows = FALSE) {
+create_Rosetta = function(dataset_ID_type) {
   # Extract Entrez ID for translation between our gx data and the datasets
+  if(dataset_ID_type != "ENSEMBL"){
   geneID_gxData = bitr(
     rownames(gxData),
     fromType = "ENSEMBL",
@@ -46,30 +38,19 @@ create_Rosetta = function(dataset,
   # Remove duplicates
   geneID_gxData = geneID_gxData[!duplicated(geneID_gxData[, 1]), ]
   geneID_gxData = geneID_gxData[!duplicated(geneID_gxData[, 2]), ]
+  rownames(geneID_gxData) = geneID_gxData[,1]
   # Standardize colnames
   colnames(geneID_gxData) = c("ENSEMBL_ID", paste0(dataset_ID_type, "_ID"))
-  rownames(geneID_gxData) = geneID_gxData[, 2]
-  
-  # Create data frame with the ID of our datasets
-  if (genes.in.rows) {
-    geneID_dataset = rownames(dataset)
-  } else{
-    geneID_dataset = dataset[, 1]
+  }else{
+    geneID_gxData = data.frame(ENSEMBL_ID = rownames(gxData),
+                               ENSEMBL2_ID = rownames(gxData),
+                               row.names = rownames(gxData))
   }
-  # Remove duplicates
-  geneID_dataset = data.frame(geneID_dataset[!duplicated(geneID_dataset)])
-  rownames(geneID_dataset) = geneID_dataset[, 1]
-  colnames(geneID_dataset) = paste0(dataset_ID_type, "_ID")
-  
-  # Select genes in both datasets
-  common_genes = intersect(geneID_dataset[, 1], geneID_gxData[, 2])
-  
-  # Create a new object with all the common genes and their three IDs
-  geneID_Rosetta = geneID_gxData[common_genes, ]
+  return(geneID_gxData)
 }
 
 #### FIT TO ONLY gxData GENES ##################################################
-fit_to_gxData = function(dataset, rosetta, genes.in.rows = FALSE) {
+fit_to_gxData = function(dataset, rosetta, genes.in.rows = TRUE) {
   # Get the list of genes
   gxData_genelist = rosetta[, 2]
   if (genes.in.rows) {
@@ -86,40 +67,57 @@ fit_to_gxData = function(dataset, rosetta, genes.in.rows = FALSE) {
   missing_expression = as.data.frame(matrix(
     nrow = length(missing_genes),
     ncol = ncol(dataset),
-    dimnames = list(missing_genes, colnames(dataset))
+    dimnames = list(rosetta[missing_genes, 1], colnames(dataset))
   ))
   
+  # Get the genes that have no translation
+  genes_no_translation = setdiff(rownames(gxData), rosetta[,1])
+  # Create an empty dataframe with the untranslated genes
+  no_translation_expression = data.frame(matrix(
+    nrow = length(genes_no_translation),
+    ncol = ncol(dataset),
+    dimnames = list(genes_no_translation, colnames(dataset))
+  ))
   # Combine the genes in common with the genes missing
   if (genes.in.rows) {
     fit_dataset = rbind(dataset[common_genes, ], missing_expression)
-    gene_list = data.frame(Gene = rownames(fit_dataset), row.names = rownames(fit_dataset))
-    fit_dataset = cbind(gene_list, fit_dataset)
   } else{
-    rownames(dataset) = dataset[, 1]
-    fit_dataset = rbind(dataset[common_genes, ], missing_expression)
+    missing_expression[,1] = rownames(missing_expression)
+    fit_dataset = rbind(dataset , missing_expression)
+    rownames(fit_dataset) = fit_dataset[, 1]
+    fit_dataset = fit_dataset[,-1]
   }
   
   # Order them according to the genes in gxData
-  fit_dataset = fit_dataset[rownames(gxData), ]
+  fit_dataset = fit_dataset[rosetta[,2],]
+  rownames(fit_dataset) = rosetta[,1]
+  fit_dataset = rbind(fit_dataset, no_translation_expression)
+  return(fit_dataset)
 }
-
-#### PUTTING IT ALL TOGETHER ###################################################
-translate_dataset = function(dataset_name,
-                             dataset_ID_type,
-                             genes.in.rows = FALSE) {
-  dataset = extract_dataset(dataset_name)
-  
-  rosetta = create_Rosetta(dataset, dataset_ID_type, genes.in.rows)
-  
-  fit_dataset = fit_to_gxData(dataset, rosetta, genes.in.rows)
-  
+#### EXPORT MANIPULATED DATA ###################################################
+export_Data = function(dataset){
   setwd(paste0(
     dirname(rstudioapi::getSourceEditorContext()$path),
     "/Translated_DataSets"
   ))
-  write.delim(fit_dataset,
-              paste0("expData_",".txt"),
-              row.names = F)
   
-  return(fit_dataset)
+  write.delim(dataset, paste0(deparse(substitute(dataset)), ".txt"), row.names = TRUE)
+}
+
+
+#### FEATURE NORMALIZATION #####################################################
+rescale_features = function(dataset){
+  max_gxData = rowMax(as.matrix(gxData))
+  min_gxData = rowMin(as.matrix(gxData))
+  
+  dataset[is.na(dataset)] = -Inf
+  max_dataset = rowMax(as.matrix(dataset))
+  dataset[dataset == -Inf] = Inf
+  min_dataset = rowMin(as.matrix(dataset))
+  dataset[dataset == Inf] = NA
+  
+  rescaled_dataset = ((dataset - min_dataset)/(max_dataset - min_dataset)*(max_gxData - min_gxData))+min_gxData
+  rescaled_dataset[is.nan(as.matrix(rescaled_dataset))] = NA
+  
+  return(rescaled_dataset)
 }
