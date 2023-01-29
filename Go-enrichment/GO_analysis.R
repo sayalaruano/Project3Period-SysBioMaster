@@ -4,8 +4,8 @@ library(readr)
 library(DOSE)
 
 # Load data
-most_imp_genes = read_csv("Results_important_genes/Multi-class-model/Consensus3methods_500important_genes_alldiseases.csv")
-list_genes = read_csv("Results_important_genes/Multi-class-model/Important_genes_alldiseases_LGBM_sorted.csv")
+most_imp_genes = read_csv("Results_important_genes/DCM/Consensus/Consensus3methods_top700important_genes_DCM.csv")
+list_genes = read_csv("Results_important_genes/DCM/Important_genes_DCM_RandomForest_sorted.csv")
 
 # Select the ENSEMBL ids
 most_imp_genes = most_imp_genes['Feature']
@@ -23,7 +23,7 @@ ensembl_out_impgenes = getBM(attributes=c("ensembl_gene_id", "entrezgene_id", "h
                          values = most_imp_genes,
                          mart = ensembl)
 
-write_csv(ensembl_out_impgenes['hgnc_symbol'], 'hgnc_symbols_impgenes_500.csv')
+write_csv(ensembl_out_impgenes['hgnc_symbol'], 'hgnc_symbols_impgenes_700_DCM.csv')
 
 impgenes_entrezids = na.omit(ensembl_out_impgenes['entrezgene_id'])
 impgenes_entrezids = lapply(impgenes_entrezids, as.character)
